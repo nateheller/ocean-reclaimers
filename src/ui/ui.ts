@@ -1,575 +1,500 @@
-import type { Audio } from '../engine/audio'
-import type { I18n } from '../engine/i18n'
-import type { Input } from '../engine/input'
-import { insertScore, type Locale, type Quality, type SaveData, type SaveStore } from '../engine/save'
-import { CONFIG } from '../game/config'
-import type { Compass, Hint } from '../game/game'
-import { formatClock, stars, type RunState } from '../game/rules'
+/** Compact DOM HUD and menus layered over the game canvas. */
+import { BALANCE, type UpgradeId } from '../config/balance'
+import { UPGRADE_IDS } from '../core/stats'
 
-export type Screen = 'boot' | 'title' | 'hud' | 'pause' | 'settings' | 'leaderboard' | 'results'
-
-export type UiActions = {
-  play(): void
-  resume(): void
-  restart(): void
-  quit(): void
-  settings(patch: Partial<SaveData>): void
+export interface UIHandlers {
+  onPlay(): void
+  onContinue(): void
+  onNewGame(): void
+  onResume(): void
+  onMute(): void
+  onBuy(id: UpgradeId): void
+  onUndock(): void
+  onKeepSailing(): void
 }
 
-const ICON = {
-  core: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 21 12 12 23 3 12Z" fill="currentColor"/><path d="M12 1 21 12H3Z" fill="#fff" opacity=".35"/></svg>',
-  cell: '<svg viewBox="0 0 20 30" aria-hidden="true"><rect x="6" y="0" width="8" height="4" rx="1.5" fill="currentColor"/><rect x="1.5" y="4" width="17" height="25" rx="4" fill="none" stroke="currentColor" stroke-width="3"/><rect class="fill" x="5" y="8" width="10" height="17" rx="2" fill="currentColor"/></svg>',
-  star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 3 6.6 7.2.8-5.4 4.9 1.5 7.1L12 17.8 5.7 21.4l1.5-7.1L1.8 9.4 9 8.6Z" fill="currentColor"/></svg>',
-  arrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 20 20 12 15 4 20Z" fill="currentColor"/></svg>',
-  pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="5" height="16" rx="1.5" fill="currentColor"/><rect x="14" y="4" width="5" height="16" rx="1.5" fill="currentColor"/></svg>',
+export interface DockData {
+  credits: number
+  owned: Record<UpgradeId, boolean>
+  unloaded: { credits: number; items: number; units: number } | null
 }
 
-/** Glyphs for control hints, per input method. */
-const GLYPH = {
-  keyboard: { keys: '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>', jump: '<kbd class="wide">Space</kbd>', dash: '<kbd>F</kbd>', select: '<kbd>Enter</kbd>', back: '<kbd>Esc</kbd>' },
-  gamepad: { keys: '<kbd class="round">L</kbd>', stickR: '<kbd class="round">R</kbd>', jump: '<kbd class="round a">A</kbd>', dash: '<kbd class="round x">X</kbd>', select: '<kbd class="round a">A</kbd>', back: '<kbd class="round b">B</kbd>' },
+export interface WinData {
+  score: number
+  credits: number
+  minutes: number
+  bestChain: number
 }
 
-/**
- * DOM game UI: title, HUD, pause, settings, results and leaderboard as HTML/CSS layered over the
- * canvas. Every screen is keyboard-, gamepad- and touch-navigable; text comes from i18n keys and
- * re-renders on language change.
- */
-export class Ui {
-  screen: Screen = 'boot'
-  private readonly root: HTMLElement
-  private readonly stack: Screen[] = []
-  private hudCache = new Map<string, string>()
-  private hintKey: Hint | null = null
-  private navRepeat = 0
-  private lastRun?: RunState
-  private savedRank = -1
-  private stormShown = false
-  private lastMethod = ''
+const ICONS = {
+  cargo: '<svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v9l-9 5-9-5z" fill="#ffb13b" stroke="#7a4300" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 8l9 5 9-5M12 13v9" fill="none" stroke="#7a4300" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+  coin: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#ffc933" stroke="#a86a00" stroke-width="1.8"/><circle cx="12" cy="12" r="6" fill="none" stroke="#e39a00" stroke-width="1.8"/></svg>',
+  wave: '<svg viewBox="0 0 24 24"><path d="M2 9c3-3 5 3 8 0s5 3 8 0 3 0 4-1M2 15c3-3 5 3 8 0s5 3 8 0 3 0 4-1" fill="none" stroke="#3ee6c1" stroke-width="2.4" stroke-linecap="round"/></svg>',
+  star: '<svg viewBox="0 0 24 24"><path d="M12 2l3 7 7 .6-5.4 4.6 1.8 7.2L12 17.6 5.6 21.4l1.8-7.2L2 9.6 9 9z" fill="#ff7ab8" stroke="#8a2a5a" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  boost: '<svg viewBox="0 0 24 24"><path d="M13 2L4 14h6l-1 8 9-12h-6z" fill="#ffe14a" stroke="#8a6a00" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+  sound: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z" fill="#fff"/><path d="M16 8.5a5 5 0 010 7M18.5 6a8.5 8.5 0 010 12" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>',
+  muted: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z" fill="#fff"/><path d="M16 9l6 6M22 9l-6 6" fill="none" stroke="#ff8a7a" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.2" fill="#fff"/><rect x="14" y="5" width="4" height="14" rx="1.2" fill="#fff"/></svg>',
+  upCargo: '<svg viewBox="0 0 32 32"><rect x="4" y="9" width="24" height="18" rx="3" fill="#2fb6c8" stroke="#0f6b82" stroke-width="2"/><rect x="8" y="13" width="7" height="7" fill="#ffd23f"/><rect x="17" y="13" width="7" height="7" fill="#ff9b2e"/><path d="M16 2v6M12 5l4-3 4 3" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  upEngine: '<svg viewBox="0 0 32 32"><rect x="5" y="7" width="12" height="18" rx="3" fill="#e83a2a" stroke="#7a1a10" stroke-width="2"/><rect x="19" y="7" width="8" height="18" rx="3" fill="#dfe6ea" stroke="#5c6e7c" stroke-width="2"/><path d="M5 28h22" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>',
+  upWidth: '<svg viewBox="0 0 32 32"><path d="M4 26C6 14 10 8 16 6M28 26C26 14 22 8 16 6" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/><circle cx="5" cy="25" r="3.4" fill="#ff5a2a"/><circle cx="27" cy="25" r="3.4" fill="#ff5a2a"/><path d="M9 21h14M11 16h10" stroke="#bff7ff" stroke-width="1.6" stroke-linecap="round"/></svg>',
+}
 
-  constructor(
-    private readonly i18n: I18n,
-    private readonly save: SaveStore,
-    private readonly audio: Audio,
-    private readonly input: Input,
-    private readonly actions: UiActions,
-  ) {
-    this.root = document.getElementById('ui')!
-    this.root.innerHTML = this.template()
-    this.root.addEventListener('click', e => this.onClick(e))
-    this.root.addEventListener('input', e => this.onInput(e))
-    this.root.addEventListener('focusin', e => {
-      if ((e.target as HTMLElement).matches('.btn, .seg button, .toggle')) this.audio.play('ui')
+const UPGRADE_ICON: Record<UpgradeId, string> = { cargo: ICONS.upCargo, engine: ICONS.upEngine, width: ICONS.upWidth }
+
+function el<T extends HTMLElement>(root: ParentNode, sel: string): T {
+  const found = root.querySelector<T>(sel)
+  if (!found) throw new Error(`Missing UI element ${sel}`)
+  return found
+}
+
+export class GameUI {
+  private cargoVal: HTMLElement
+  private cargoBar: HTMLElement
+  private cargoPill: HTMLElement
+  private creditsVal: HTMLElement
+  private creditsPill: HTMLElement
+  private scoreVal: HTMLElement
+  private cleanVal: HTMLElement
+  private cleanBar: HTMLElement
+  private comboBox: HTMLElement
+  private comboMult: HTMLElement
+  private comboChain: HTMLElement
+  private comboBar: HTMLElement
+  private boostBox: HTMLElement
+  private boostFill: HTMLElement
+  private prompt: HTMLElement
+  private hint: HTMLElement
+  private toastBox: HTMLElement
+  private muteBtn: HTMLElement
+  private pauseMute: HTMLElement
+  private home: HTMLElement
+  private homeDist: HTMLElement
+  private title: HTMLElement
+  private pause: HTMLElement
+  private dock: HTMLElement
+  private win: HTMLElement
+  private popLayer: HTMLElement
+
+  private shownCredits = 0
+  private creditAnim = 0
+  private lastCombo = -1
+  private lastPrompt = ''
+  private lastHint = ''
+  private toastTimer = 0
+  private newArmed: HTMLElement | null = null
+  private newArmTimer = 0
+
+  private h: UIHandlers
+
+  constructor(private root: HTMLElement, handlers: UIHandlers) {
+    this.h = handlers
+    root.innerHTML = `
+      <div class="hud hud-tl">
+        <div class="pill" id="p-cargo"><i class="ico">${ICONS.cargo}</i><div class="stack"><span class="lbl">Cargo</span><b class="val" id="v-cargo">0/20</b><div class="bar"><div id="b-cargo"></div></div></div></div>
+        <div class="pill" id="p-credits"><i class="ico">${ICONS.coin}</i><div class="stack"><span class="lbl">Credits</span><b class="val" id="v-credits">0</b></div></div>
+        <div class="pill wide" id="p-clean"><i class="ico">${ICONS.wave}</i><div class="stack"><span class="lbl">Coral Bay cleaned</span><b class="val" id="v-clean">0%</b>
+          <div class="bar clean"><div id="b-clean"></div><span class="tick" style="left:25%"></span><span class="tick" style="left:50%"></span><span class="tick goal" style="left:75%"></span></div></div></div>
+      </div>
+      <div class="hud hud-tr">
+        <div class="pill small"><i class="ico">${ICONS.star}</i><div class="stack"><span class="lbl">Score</span><b class="val" id="v-score">0</b></div></div>
+        <button class="round" id="btn-mute" title="Sound (M)" tabindex="-1">${ICONS.sound}</button>
+        <button class="round" id="btn-pause" title="Pause (Esc)" tabindex="-1">${ICONS.pause}</button>
+      </div>
+      <div class="combo" id="combo"><div class="combo-mult" id="c-mult">x1.2</div><div class="combo-chain" id="c-chain">3 in a row</div><div class="combo-bar"><div id="c-bar"></div></div></div>
+      <div class="boost" id="boost"><i class="ico">${ICONS.boost}</i><div class="stack"><span class="lbl"><kbd>Space</kbd> Boost</span><div class="bar boostbar"><div id="b-boost"></div></div></div></div>
+      <div class="toast" id="toast"></div>
+      <div class="hint" id="hint"></div>
+      <div class="prompt" id="prompt"></div>
+      <div class="home" id="home"><div class="arrow"></div><span id="home-dist"></span></div>
+      <div class="pop-layer" id="pops"></div>
+
+      <section class="dock" id="dock" hidden></section>
+
+      <section class="screen title" id="title">
+        <div class="title-card">
+          <div class="logo"><span class="logo-top">Ocean</span><span class="logo-main">Reclaimers</span></div>
+          <p class="tagline">Scoop up the plastic. Clear Coral Bay.</p>
+          <div class="btns" id="title-btns"></div>
+          <div class="keys">
+            <div><span class="kg"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span> or <span class="kg"><kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd></span> sail</div>
+            <div><kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> station &nbsp; <kbd>Esc</kbd> pause</div>
+          </div>
+          <p class="fine">A fictional, simplified game inspired by ISS Breakthrough SB012. Not a scientific model.</p>
+        </div>
+      </section>
+
+      <section class="screen overlay" id="pause" hidden>
+        <div class="card">
+          <h2>Paused</h2>
+          <div class="btns col">
+            <button class="btn primary" data-act="resume" tabindex="-1">Resume</button>
+            <button class="btn" data-act="mute" id="pause-mute" tabindex="-1">Sound: On</button>
+            <button class="btn danger" data-act="new" tabindex="-1">New Game</button>
+          </div>
+          <div class="keys small">
+            <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows &ndash; sail</div>
+            <div><kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> station &nbsp; <kbd>M</kbd> mute</div>
+          </div>
+          <p class="fine">Fictional and simplified. Visual changes are stylized rewards, not scientific predictions.</p>
+        </div>
+      </section>
+
+      <section class="screen overlay" id="win" hidden></section>
+    `
+    this.cargoVal = el(root, '#v-cargo')
+    this.cargoBar = el(root, '#b-cargo')
+    this.cargoPill = el(root, '#p-cargo')
+    this.creditsVal = el(root, '#v-credits')
+    this.creditsPill = el(root, '#p-credits')
+    this.scoreVal = el(root, '#v-score')
+    this.cleanVal = el(root, '#v-clean')
+    this.cleanBar = el(root, '#b-clean')
+    this.comboBox = el(root, '#combo')
+    this.comboMult = el(root, '#c-mult')
+    this.comboChain = el(root, '#c-chain')
+    this.comboBar = el(root, '#c-bar')
+    this.boostBox = el(root, '#boost')
+    this.boostFill = el(root, '#b-boost')
+    this.prompt = el(root, '#prompt')
+    this.hint = el(root, '#hint')
+    this.toastBox = el(root, '#toast')
+    this.muteBtn = el(root, '#btn-mute')
+    this.pauseMute = el(root, '#pause-mute')
+    this.home = el(root, '#home')
+    this.homeDist = el(root, '#home-dist')
+    this.title = el(root, '#title')
+    this.pause = el(root, '#pause')
+    this.dock = el(root, '#dock')
+    this.win = el(root, '#win')
+    this.popLayer = el(root, '#pops')
+
+    // Never let a clicked button keep keyboard focus (Space would re-trigger it).
+    root.addEventListener('mousedown', (e) => {
+      if ((e.target as HTMLElement).closest('button')) e.preventDefault()
     })
-    window.addEventListener('keydown', e => this.onKey(e))
-    i18n.onChange(() => this.translate())
-    this.translate()
-    this.refreshSettings()
-  }
-
-  // ─── screens ────────────────────────────────────────────────────────────
-
-  show(screen: Screen): void {
-    this.stack.length = 0
-    this.setScreen(screen)
-  }
-
-  /** Open an overlay screen (settings, leaderboard) that returns to the current one on Back. */
-  push(screen: Screen): void {
-    this.stack.push(this.screen)
-    this.setScreen(screen)
-  }
-
-  back(): void {
-    const prev = this.stack.pop()
-    if (prev) this.setScreen(prev)
-    else if (this.screen === 'pause') this.actions.resume()
-  }
-
-  private setScreen(screen: Screen): void {
-    this.screen = screen
-    for (const el of this.root.querySelectorAll<HTMLElement>('[data-screen]')) {
-      const active = el.dataset.screen === screen || (el.dataset.screen === 'hud' && (screen === 'pause' || screen === 'results' || (screen === 'settings' && this.stack.includes('pause'))))
-      el.classList.toggle('is-active', active)
-      el.setAttribute('aria-hidden', String(!active))
-    }
-    this.root.dataset.activeScreen = screen
-    if (screen === 'title') this.renderBest()
-    if (screen === 'leaderboard') this.renderLeaderboard()
-    if (screen === 'hud') this.stormShown = false
-    // Focus the first control so keyboard and gamepad players can act immediately.
-    requestAnimationFrame(() => {
-      const first = this.navItems()[0]
-      if (first && this.input.method !== 'touch') first.focus({ preventScroll: true })
-      else (document.activeElement as HTMLElement | null)?.blur?.()
+    this.muteBtn.addEventListener('click', () => this.h.onMute())
+    el(root, '#btn-pause').addEventListener('click', () => this.requestPause())
+    this.pause.addEventListener('click', (e) => {
+      const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act
+      if (act === 'resume') this.h.onResume()
+      else if (act === 'mute') this.h.onMute()
+      else if (act === 'new') this.confirmNew(e.target as HTMLElement, () => this.h.onNewGame())
     })
+    this.onPauseRequest = () => {}
   }
 
-  setBootProgress(progress: number): void {
-    const bar = this.q<HTMLElement>('.boot-bar i')
-    bar.style.transform = `scaleX(${Math.max(0.04, Math.min(1, progress))})`
+  setHandlers(h: UIHandlers): void {
+    this.h = h
   }
 
-  // ─── HUD ────────────────────────────────────────────────────────────────
-
-  updateHud(run: RunState, compass: Compass | null): void {
-    this.set('cores', `${run.collected}<small>/${run.total}</small>`)
-    this.set('score', run.score.toLocaleString(this.i18n.locale))
-    this.set('clock', formatClock(run.timeLeft))
-    const low = run.timeLeft <= CONFIG.drones.rageAt
-    this.q('.hud-clock').classList.toggle('is-low', low)
-    if (low && !this.stormShown && run.phase === 'playing') {
-      this.stormShown = true
-      this.banner(this.i18n.t('hud.storm'))
-    }
-    const cells = this.q('.hud-cells')
-    if (cells.childElementCount !== CONFIG.run.lives) {
-      cells.innerHTML = `<span class="hud-cell">${ICON.cell}</span>`.repeat(CONFIG.run.lives)
-    }
-    for (const [i, cell] of this.qa('.hud-cell').entries()) cell.classList.toggle('is-empty', i >= run.lives)
-
-    const combo = this.q('.hud-combo')
-    combo.classList.toggle('is-active', run.combo > 1)
-    if (run.combo > 1) {
-      if (this.set('combo', `×${run.combo}`)) {
-        combo.classList.remove('pop')
-        void combo.offsetWidth
-        combo.classList.add('pop')
-      }
-      this.q<HTMLElement>('.hud-combo-bar i').style.transform = `scaleX(${run.comboTimer / CONFIG.score.comboWindow})`
-    }
-
-    const compassEl = this.q<HTMLElement>('.hud-compass')
-    compassEl.classList.toggle('is-hidden', !compass)
-    if (compass) {
-      this.q<HTMLElement>('.hud-compass-arrow').style.transform = `rotate(${-compass.angle}rad)`
-      this.set('distance', this.i18n.t('hud.nearest', { m: Math.round(compass.distance) }))
-      compassEl.dataset.rise = compass.rise > 2 ? 'up' : compass.rise < -2 ? 'down' : ''
-    }
+  /** Set by the scene so the HUD pause button can ask for a pause. */
+  onPauseRequest: () => void
+  private requestPause(): void {
+    this.onPauseRequest()
   }
 
-  popup(text: string, at: { x: number; y: number }, kind: 'score' | 'hurt'): void {
-    const el = document.createElement('div')
-    el.className = `popup popup-${kind}`
-    el.textContent = text
-    el.style.left = `${at.x}px`
-    el.style.top = `${at.y}px`
-    this.q('.popups').append(el)
-    el.addEventListener('animationend', () => el.remove())
-  }
-
-  hurt(): void {
-    const v = this.q('.hurt-vignette')
-    v.classList.remove('flash')
-    void (v as HTMLElement).offsetWidth
-    v.classList.add('flash')
-  }
-
-  hint(hint: Hint | null): void {
-    this.hintKey = hint
-    this.renderHint()
-  }
-
-  private renderHint(): void {
-    const el = this.q('.hint')
-    const hint = this.hintKey
-    if (!hint) {
-      el.classList.remove('is-active')
+  private confirmNew(target: HTMLElement, go: () => void): void {
+    const btn = target.closest<HTMLElement>('button')
+    if (!btn) return
+    if (this.newArmed === btn) {
+      window.clearTimeout(this.newArmTimer)
+      btn.textContent = btn.dataset.label ?? 'New Game'
+      this.newArmed = null
+      go()
       return
     }
-    const method = this.input.method
-    const glyph = method === 'gamepad' ? GLYPH.gamepad : GLYPH.keyboard
-    const key = hint === 'cores' ? 'hint.cores' : `hint.${hint}.${method === 'touch' && hint === 'look' ? 'keyboard' : method}`
-    const vars = { keys: glyph.keys, stick: hint === 'look' ? GLYPH.gamepad.stickR : GLYPH.gamepad.keys, key: hint === 'dash' ? glyph.dash : glyph.jump }
-    el.querySelector('span')!.innerHTML = this.i18n.t(key, vars)
-    el.classList.add('is-active')
+    this.disarmNew()
+    btn.dataset.label = btn.textContent ?? 'New Game'
+    btn.textContent = 'Click again to erase progress'
+    this.newArmed = btn
+    this.newArmTimer = window.setTimeout(() => this.disarmNew(), 3000)
   }
 
-  private banner(text: string): void {
-    const el = this.q('.banner')
-    el.textContent = text
-    el.classList.remove('show')
-    void (el as HTMLElement).offsetWidth
-    el.classList.add('show')
-  }
-
-  // ─── results ────────────────────────────────────────────────────────────
-
-  showResults(run: RunState): void {
-    this.lastRun = run
-    this.savedRank = -1
-    const won = run.phase === 'won'
-    const el = this.q('[data-screen="results"]')
-    el.classList.toggle('is-won', won)
-    const titleKey = won ? 'results.won' : run.loseReason === 'time' ? 'results.lost.time' : 'results.lost.lives'
-    this.q('.results-title').setAttribute('data-i18n', titleKey)
-    const n = stars(run)
-    for (const [i, s] of this.qa('.results-stars .star').entries()) {
-      s.classList.toggle('is-on', i < n)
-      ;(s as HTMLElement).style.animationDelay = `${0.35 + i * 0.22}s`
+  private disarmNew(): void {
+    if (this.newArmed) {
+      this.newArmed.textContent = this.newArmed.dataset.label ?? 'New Game'
+      this.newArmed = null
     }
-    const coreScore = run.score - run.timeBonus - run.lifeBonus
-    const fmt = (v: number) => v.toLocaleString(this.i18n.locale)
-    this.q('.r-cores').textContent = `${run.collected} / ${run.total}`
-    this.q('.r-core-score').textContent = fmt(coreScore)
-    this.q('.r-time').textContent = formatClock(run.elapsed)
-    this.q('.r-time-bonus').textContent = `+${fmt(run.timeBonus)}`
-    this.q('.r-life-bonus').textContent = `+${fmt(run.lifeBonus)}`
-    this.q('.r-total').textContent = fmt(run.score)
-    const best = this.save.data.leaderboard[0]?.score ?? 0
-    this.q('.results-best').classList.toggle('is-active', !run.unranked && run.score > best && run.score > 0)
-    const form = this.q('.results-save')
-    form.classList.toggle('is-hidden', run.unranked || run.score <= 0 || insertScore(this.save.data.leaderboard, this.entry(run)).rank < 0)
-    form.classList.remove('is-saved')
-    this.q<HTMLInputElement>('.results-name').value = this.save.data.playerName
-    this.q('.results-rank').textContent = ''
-    this.translate()
-    this.show('results')
   }
 
-  private entry(run: RunState) {
-    return { name: this.q<HTMLInputElement>('.results-name')?.value.trim().slice(0, 16) || this.save.data.playerName, score: run.score, seconds: Math.round(run.elapsed), at: Date.now() }
+  // ---- title -----------------------------------------------------------------
+
+  showTitle(hasSave: boolean, progress: number): void {
+    const box = el(this.root, '#title-btns')
+    box.innerHTML = hasSave
+      ? `<button class="btn primary big" data-act="continue" tabindex="-1">Continue <small>${Math.round(progress * 100)}% cleaned</small></button><button class="btn" data-act="new" tabindex="-1">New Game</button>`
+      : `<button class="btn primary big" data-act="play" tabindex="-1">Set Sail</button>`
+    box.onclick = (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')
+      if (!btn) return
+      if (btn.dataset.act === 'play') this.h.onPlay()
+      else if (btn.dataset.act === 'continue') this.h.onContinue()
+      else if (btn.dataset.act === 'new') this.confirmNew(btn, () => this.h.onNewGame())
+    }
+    this.title.hidden = false
+    this.root.classList.add('on-title')
   }
 
-  private saveScore(): void {
-    if (!this.lastRun || this.lastRun.unranked || this.savedRank >= 0) return
-    const entry = this.entry(this.lastRun)
-    const { board, rank } = insertScore(this.save.data.leaderboard, entry)
-    this.save.update({ leaderboard: board, playerName: entry.name })
-    this.savedRank = rank
-    this.q('.results-save').classList.add('is-saved')
-    this.q('.results-rank').textContent = rank >= 0 ? this.i18n.t('results.rank', { rank: rank + 1 }) : ''
-    this.audio.play('ui')
+  hideTitle(): void {
+    this.title.hidden = true
+    this.root.classList.remove('on-title')
   }
 
-  private renderLeaderboard(): void {
-    const list = this.q('.board')
-    const board = this.save.data.leaderboard
-    if (board.length === 0) {
-      list.innerHTML = `<li class="board-empty">${this.i18n.t('leaderboard.empty')}</li>`
+  get titleOpen(): boolean {
+    return !this.title.hidden
+  }
+
+  // ---- HUD values -------------------------------------------------------------
+
+  setCargo(used: number, cap: number): void {
+    this.cargoVal.textContent = `${used}/${cap}`
+    const f = cap > 0 ? used / cap : 0
+    this.cargoBar.style.width = `${f * 100}%`
+    this.cargoPill.classList.toggle('warn', f >= 0.8 && f < 1)
+    this.cargoPill.classList.toggle('full', f >= 1)
+  }
+
+  bumpCargo(): void {
+    this.cargoPill.classList.remove('bump')
+    void this.cargoPill.offsetWidth
+    this.cargoPill.classList.add('bump')
+  }
+
+  flashFull(): void {
+    this.cargoPill.classList.remove('shake')
+    void this.cargoPill.offsetWidth
+    this.cargoPill.classList.add('shake')
+  }
+
+  setCredits(n: number, animate = true): void {
+    window.cancelAnimationFrame(this.creditAnim)
+    if (!animate || n === this.shownCredits) {
+      this.shownCredits = n
+      this.creditsVal.textContent = String(n)
       return
     }
-    list.innerHTML = board
-      .map((e, i) => `<li class="${i === this.savedRank ? 'is-me' : ''}"><b>${i + 1}</b><span class="board-name"></span><span>${formatClock(e.seconds)}</span><em>${e.score.toLocaleString(this.i18n.locale)}</em></li>`)
-      .join('')
-    // Names are player-entered text: assign via textContent, never innerHTML.
-    list.querySelectorAll('.board-name').forEach((el, i) => (el.textContent = board[i].name))
+    const from = this.shownCredits
+    const start = performance.now()
+    const dur = Math.min(900, 250 + Math.abs(n - from) * 12)
+    this.creditsPill.classList.remove('bump')
+    void this.creditsPill.offsetWidth
+    this.creditsPill.classList.add('bump')
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / dur)
+      const eased = 1 - Math.pow(1 - t, 3)
+      this.shownCredits = Math.round(from + (n - from) * eased)
+      this.creditsVal.textContent = String(this.shownCredits)
+      if (t < 1) this.creditAnim = window.requestAnimationFrame(tick)
+    }
+    this.creditAnim = window.requestAnimationFrame(tick)
   }
 
-  private renderBest(): void {
-    const best = this.save.data.leaderboard[0]?.score ?? 0
-    const el = this.q('.title-best')
-    el.classList.toggle('is-hidden', best <= 0)
-    el.textContent = this.i18n.t('menu.best', { score: best.toLocaleString(this.i18n.locale) })
+  setScore(n: number): void {
+    this.scoreVal.textContent = n.toLocaleString('en-US')
   }
 
-  // ─── settings ───────────────────────────────────────────────────────────
-
-  /** Re-read the save into the Settings controls (call after changing settings outside the UI). */
-  refreshSettings(): void {
-    const d = this.save.data
-    this.q<HTMLInputElement>('[name="musicVolume"]').value = String(d.musicVolume)
-    this.q<HTMLInputElement>('[name="sfxVolume"]').value = String(d.sfxVolume)
-    this.q<HTMLInputElement>('[name="sensitivity"]').value = String(d.sensitivity)
-    for (const t of this.qa<HTMLButtonElement>('.toggle')) {
-      const on = d[t.dataset.setting as 'muted' | 'invertY' | 'reducedMotion'] === true
-      t.setAttribute('aria-pressed', String(on))
-      t.querySelector('span')!.setAttribute('data-i18n', on ? 'settings.on' : 'settings.off')
-    }
-    for (const b of this.qa<HTMLButtonElement>('.seg button')) {
-      const key = b.parentElement!.dataset.setting as 'quality' | 'locale'
-      const current = key === 'locale' ? this.i18n.locale : d.quality
-      b.setAttribute('aria-pressed', String(b.dataset.value === current))
-    }
-    for (const r of this.qa<HTMLInputElement>('input[type="range"]')) r.style.setProperty('--fill', `${((Number(r.value) - Number(r.min)) / (Number(r.max) - Number(r.min))) * 100}%`)
-    this.translate()
+  setProgress(frac: number): void {
+    const pct = Math.floor(frac * 100 + 1e-6)
+    this.cleanVal.textContent = `${pct}%`
+    this.cleanBar.style.width = `${Math.min(100, (frac / 1) * 100)}%`
+    this.root.dataset.clean = String(Math.floor(pct / 25))
   }
 
-  // ─── events ─────────────────────────────────────────────────────────────
-
-  private onClick(e: MouseEvent): void {
-    const target = (e.target as HTMLElement).closest<HTMLElement>('[data-action], .toggle, .seg button')
-    if (!target) return
-    this.audio.unlock()
-    if (target.matches('.toggle')) {
-      const key = target.dataset.setting as 'muted' | 'invertY' | 'reducedMotion'
-      this.actions.settings({ [key]: !this.save.data[key] })
-      this.refreshSettings()
-      this.audio.play('ui')
-      return
-    }
-    if (target.matches('.seg button')) {
-      const key = target.parentElement!.dataset.setting
-      if (key === 'quality') this.actions.settings({ quality: target.dataset.value as Quality })
-      if (key === 'locale') this.actions.settings({ locale: target.dataset.value as Locale })
-      this.refreshSettings()
-      this.audio.play('ui')
-      return
-    }
-    const action = target.dataset.action
-    switch (action) {
-      case 'play': this.actions.play(); break
-      case 'resume': this.actions.resume(); break
-      case 'restart': this.actions.restart(); break
-      case 'quit': this.actions.quit(); break
-      case 'settings': this.push('settings'); break
-      case 'leaderboard': this.push('leaderboard'); break
-      case 'back': this.back(); break
-      case 'save-score': this.saveScore(); break
-      case 'pause': window.dispatchEvent(new CustomEvent('game:pause')); break
-    }
-  }
-
-  private onInput(e: Event): void {
-    const el = e.target as HTMLInputElement
-    if (el.type !== 'range') return
-    el.style.setProperty('--fill', `${((Number(el.value) - Number(el.min)) / (Number(el.max) - Number(el.min))) * 100}%`)
-    this.actions.settings({ [el.name]: Number(el.value) } as Partial<SaveData>)
-  }
-
-  private onKey(e: KeyboardEvent): void {
-    if (this.screen === 'hud' || this.screen === 'boot') return
-    const typing = (e.target as HTMLElement).matches?.('input[type="text"]')
-    if ((e.code === 'Escape' || (e.code === 'Backspace' && !typing)) && this.screen !== 'title') {
-      // The pause toggle in main.ts owns Escape on the pause screen itself.
-      if (this.screen !== 'pause' && this.screen !== 'results') {
-        e.preventDefault()
-        // Escape is also the pause toggle; consume it so leaving Settings doesn't resume the run.
-        this.input.consume('pause')
-        this.back()
+  setCombo(chain: number, mult: number, remaining: number): void {
+    if (chain < 2 || remaining <= 0) {
+      if (this.lastCombo !== 0) {
+        this.comboBox.classList.remove('on')
+        this.lastCombo = 0
       }
       return
     }
-    if (e.code === 'ArrowDown' || e.code === 'ArrowUp') {
-      e.preventDefault()
-      this.moveFocus(e.code === 'ArrowDown' ? 1 : -1)
+    this.comboBox.classList.add('on')
+    this.comboBox.classList.toggle('boosted', mult > 1)
+    this.comboBox.dataset.tier = mult >= 2 ? '3' : mult >= 1.5 ? '2' : mult > 1 ? '1' : '0'
+    this.comboMult.textContent = mult > 1 ? `\u00d7${mult.toFixed(1)}` : `${chain} chain`
+    this.comboChain.textContent = mult > 1 ? `${chain} in a row` : 'keep going!'
+    this.comboBar.style.width = `${remaining * 100}%`
+    if (this.lastCombo !== chain) {
+      this.lastCombo = chain
+      this.comboBox.classList.remove('hit')
+      void this.comboBox.offsetWidth
+      this.comboBox.classList.add('hit')
     }
   }
 
-  /** Per-frame gamepad menu navigation (keyboard uses native focus + onKey). */
-  frame(frameSeconds: number): void {
-    if (this.input.method !== this.lastMethod) {
-      this.lastMethod = this.input.method
-      this.renderPrompts()
-      this.renderHint()
-    }
-    if (this.screen === 'hud' || this.screen === 'boot') return
-    if (this.input.method !== 'gamepad') {
-      this.input.consume('confirm')
-      this.input.consume('back')
+  setBoost(ready: boolean, cooldownFrac: number, active: boolean): void {
+    this.boostBox.classList.toggle('ready', ready)
+    this.boostBox.classList.toggle('active', active)
+    this.boostFill.style.width = `${(ready ? 1 : 1 - cooldownFrac) * 100}%`
+  }
+
+  setPrompt(html: string | null): void {
+    const v = html ?? ''
+    if (v === this.lastPrompt) return
+    this.lastPrompt = v
+    this.prompt.innerHTML = v
+    this.prompt.classList.toggle('on', v !== '')
+  }
+
+  setHint(text: string | null): void {
+    const v = text ?? ''
+    if (v === this.lastHint) return
+    this.lastHint = v
+    this.hint.innerHTML = v
+    this.hint.classList.toggle('on', v !== '')
+  }
+
+  toast(title: string, sub = '', kind: 'zone' | 'milestone' = 'zone'): void {
+    window.clearTimeout(this.toastTimer)
+    this.toastBox.className = `toast ${kind}`
+    this.toastBox.innerHTML = `<b>${title}</b>${sub ? `<span>${sub}</span>` : ''}`
+    void this.toastBox.offsetWidth
+    this.toastBox.classList.add('on')
+    this.toastTimer = window.setTimeout(() => this.toastBox.classList.remove('on'), kind === 'milestone' ? 4200 : 2200)
+  }
+
+  setMuted(muted: boolean): void {
+    this.muteBtn.innerHTML = muted ? ICONS.muted : ICONS.sound
+    this.muteBtn.classList.toggle('off', muted)
+    this.pauseMute.textContent = `Sound: ${muted ? 'Off' : 'On'}`
+  }
+
+  /** Arrow pointing to the station, placed on an ellipse around the screen center. */
+  setHome(angle: number | null, distPx: number): void {
+    if (angle === null) {
+      this.home.classList.remove('on')
       return
     }
-    const y = this.input.move.y
-    const x = this.input.move.x
-    this.navRepeat = Math.max(0, this.navRepeat - frameSeconds)
-    const active = document.activeElement as HTMLElement | null
-    if (Math.abs(y) > 0.6 && this.navRepeat <= 0) {
-      this.moveFocus(y < 0 ? 1 : -1)
-      this.navRepeat = 0.22
-    } else if (Math.abs(x) > 0.6 && this.navRepeat <= 0 && active?.matches('input[type="range"]')) {
-      const r = active as HTMLInputElement
-      r.value = String(Number(r.value) + Math.sign(x) * Number(r.step || 0.1))
-      r.dispatchEvent(new Event('input', { bubbles: true }))
-      this.navRepeat = 0.12
-    } else if (Math.abs(x) > 0.6 && this.navRepeat <= 0 && active?.parentElement?.matches('.seg')) {
-      const sib = (Math.sign(x) > 0 ? active.nextElementSibling : active.previousElementSibling) as HTMLElement | null
-      sib?.focus()
-      this.navRepeat = 0.22
-    } else if (Math.abs(y) < 0.3 && Math.abs(x) < 0.3) {
-      this.navRepeat = 0
+    const w = this.root.clientWidth
+    const h = this.root.clientHeight
+    const rx = w * 0.36
+    const ry = h * 0.34
+    this.home.style.left = `${w / 2 + Math.cos(angle) * rx}px`
+    this.home.style.top = `${h / 2 + Math.sin(angle) * ry}px`
+    ;(this.home.firstElementChild as HTMLElement).style.transform = `rotate(${angle}rad)`
+    this.homeDist.textContent = `Station ${Math.round(distPx / 10)} m`
+    this.home.classList.add('on')
+  }
+
+  /** Screen-space floating text (used for big combo callouts). */
+  pop(text: string, cls = ''): void {
+    const d = document.createElement('div')
+    d.className = `pop ${cls}`
+    d.textContent = text
+    this.popLayer.appendChild(d)
+    window.setTimeout(() => d.remove(), 1400)
+  }
+
+  // ---- pause ------------------------------------------------------------------
+
+  showPause(show: boolean): void {
+    this.pause.hidden = !show
+    if (!show) this.disarmNew()
+  }
+
+  get pauseOpen(): boolean {
+    return !this.pause.hidden
+  }
+
+  // ---- docked menu --------------------------------------------------------------
+
+  showDock(data: DockData): void {
+    this.dock.hidden = false
+    this.renderDock(data)
+  }
+
+  renderDock(data: DockData): void {
+    const u = data.unloaded
+    const summary = u
+      ? u.items > 0
+        ? `<div class="sum good">Unloaded <b>${u.items}</b> item${u.items === 1 ? '' : 's'} <span>(${u.units} units)</span><em>+${u.credits}</em></div>`
+        : '<div class="sum">Hold is empty &ndash; go find more plastic!</div>'
+      : ''
+    const rows = UPGRADE_IDS.map((id, i) => {
+      const spec = BALANCE.upgrades[id]
+      const owned = data.owned[id]
+      const afford = data.credits >= spec.cost
+      const state = owned ? 'owned' : afford ? 'afford' : 'locked'
+      const action = owned
+        ? '<span class="tag">Installed</span>'
+        : `<button class="buy" data-buy="${id}" tabindex="-1">${spec.cost}<i class="ico sm">${ICONS.coin}</i></button>`
+      const need = !owned && !afford ? `<small>${spec.cost - data.credits} more</small>` : ''
+      return `<div class="up ${state}" data-up="${id}"><kbd>${i + 1}</kbd><i class="uico">${UPGRADE_ICON[id]}</i><div class="utext"><b>${spec.name}</b><span>${spec.blurb}</span>${need}</div>${action}</div>`
+    }).join('')
+    this.dock.innerHTML = `
+      <header><b>Reclamation Station</b><span class="bal"><i class="ico sm">${ICONS.coin}</i>${data.credits}</span></header>
+      ${summary}
+      <div class="ups">${rows}</div>
+      <footer><button class="btn primary" data-undock tabindex="-1"><kbd>E</kbd> Set sail</button></footer>`
+    this.dock.onclick = (e) => {
+      const t = e.target as HTMLElement
+      const buy = t.closest<HTMLElement>('[data-buy]')
+      if (buy) this.h.onBuy(buy.dataset.buy as UpgradeId)
+      else if (t.closest('[data-undock]')) this.h.onUndock()
     }
-    // Navigation and confirm may arrive together; activate the newly focused control.
-    if (this.input.consume('confirm')) (document.activeElement as HTMLElement | null)?.click()
-    if (this.input.consume('back') && this.screen !== 'title') this.back()
   }
 
-  private navItems(): HTMLElement[] {
-    const screen = this.q(`[data-screen="${this.screen}"]`)
-    return [...screen.querySelectorAll<HTMLElement>('[data-nav]')].filter(el => el.offsetParent !== null && !el.closest('.is-hidden'))
+  shakeUpgrade(id: UpgradeId): void {
+    const row = this.dock.querySelector<HTMLElement>(`[data-up="${id}"]`)
+    if (!row) return
+    row.classList.remove('shake')
+    void row.offsetWidth
+    row.classList.add('shake')
   }
 
-  private moveFocus(dir: 1 | -1): void {
-    const items = this.navItems()
-    if (items.length === 0) return
-    // Buttons inside one segmented control count as a single row.
-    const rows: HTMLElement[][] = []
-    for (const el of items) {
-      const seg = el.parentElement?.matches('.seg') ? el.parentElement : null
-      const last = rows[rows.length - 1]
-      if (seg && last && last[0].parentElement === seg) last.push(el)
-      else rows.push([el])
+  flashUpgrade(id: UpgradeId): void {
+    const row = this.dock.querySelector<HTMLElement>(`[data-up="${id}"]`)
+    row?.classList.add('flash')
+  }
+
+  hideDock(): void {
+    this.dock.hidden = true
+  }
+
+  get dockOpen(): boolean {
+    return !this.dock.hidden
+  }
+
+  // ---- win panel ------------------------------------------------------------------
+
+  showWin(d: WinData): void {
+    this.win.innerHTML = `
+      <div class="card win-card">
+        <div class="ribbon">Milestone reached</div>
+        <h2>Coral Bay is sparkling!</h2>
+        <p>You have cleaned 75% of the starting debris. The water is clear and the sea is full of life.</p>
+        <div class="stats">
+          <div><b>${d.score.toLocaleString('en-US')}</b><span>Arcade score</span></div>
+          <div><b>${d.credits}</b><span>Credits</span></div>
+          <div><b>${d.bestChain}</b><span>Best chain</span></div>
+          <div><b>${d.minutes}</b><span>Minutes</span></div>
+        </div>
+        <div class="btns">
+          <button class="btn primary big" data-act="keep" tabindex="-1">Keep Sailing</button>
+          <button class="btn" data-act="new" tabindex="-1">New Game</button>
+        </div>
+        <p class="fine">A fictional, simplified game. The clearer water and extra wildlife are stylized rewards, not scientific predictions.</p>
+      </div>`
+    this.win.hidden = false
+    this.win.onclick = (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')
+      if (!btn) return
+      if (btn.dataset.act === 'keep') this.h.onKeepSailing()
+      else if (btn.dataset.act === 'new') this.confirmNew(btn, () => this.h.onNewGame())
     }
-    const current = rows.findIndex(r => r.includes(document.activeElement as HTMLElement))
-    const next = rows[(current + dir + rows.length) % rows.length]
-    ;(next.find(el => el.getAttribute('aria-pressed') === 'true') ?? next[0]).focus()
   }
 
-  // ─── helpers ────────────────────────────────────────────────────────────
-
-  private translate(): void {
-    for (const el of this.root.querySelectorAll<HTMLElement>('[data-i18n]')) el.textContent = this.i18n.t(el.dataset.i18n!)
-    for (const el of this.root.querySelectorAll<HTMLElement>('[data-i18n-label]')) el.setAttribute('aria-label', this.i18n.t(el.dataset.i18nLabel!))
-    for (const el of this.root.querySelectorAll<HTMLInputElement>('[data-i18n-placeholder]')) el.placeholder = this.i18n.t(el.dataset.i18nPlaceholder!)
-    this.renderPrompts()
-    this.renderHint()
-    if (this.screen === 'title') this.renderBest()
-    if (this.screen === 'leaderboard') this.renderLeaderboard()
-    this.hudCache.clear()
-    document.title = this.i18n.t('game.title')
+  hideWin(): void {
+    this.win.hidden = true
   }
 
-  /** Bottom-bar button prompts follow the active input method. */
-  renderPrompts(): void {
-    const g = this.input.method === 'gamepad' ? GLYPH.gamepad : GLYPH.keyboard
-    const html = this.input.method === 'touch' ? '' : `<span>${g.select} ${this.i18n.t('prompt.select')}</span><span>${g.back} ${this.i18n.t('prompt.back')}</span>`
-    for (const el of this.qa('.prompts')) el.innerHTML = html
+  get winOpen(): boolean {
+    return !this.win.hidden
   }
 
-  /** Update a HUD text slot only when it changed; returns true if it did. */
-  private set(slot: string, html: string): boolean {
-    if (this.hudCache.get(slot) === html) return false
-    this.hudCache.set(slot, html)
-    this.q(`[data-slot="${slot}"]`).innerHTML = html
-    return true
-  }
-
-  private q<T extends HTMLElement = HTMLElement>(sel: string): T {
-    return this.root.querySelector<T>(sel)!
-  }
-
-  private qa<T extends HTMLElement = HTMLElement>(sel: string): T[] {
-    return [...this.root.querySelectorAll<T>(sel)]
-  }
-
-  private template(): string {
-    const range = (name: string, label: string, min: number, max: number, step: number) =>
-      `<label class="row"><span data-i18n="${label}"></span><input data-nav type="range" name="${name}" min="${min}" max="${max}" step="${step}"></label>`
-    const toggle = (setting: string, label: string) =>
-      `<div class="row"><span data-i18n="${label}"></span><button data-nav class="toggle" data-setting="${setting}" aria-pressed="false"><i></i><span></span></button></div>`
-    return /* html */ `
-<section class="screen screen-boot is-active" data-screen="boot">
-  <div class="boot-logo" data-i18n="game.title"></div>
-  <div class="boot-bar"><i></i></div>
-  <div class="boot-label" data-i18n="boot.loading"></div>
-</section>
-
-<section class="screen screen-title" data-screen="title">
-  <div class="title-vignette"></div>
-  <div class="title-best is-hidden"></div>
-  <div class="title-block">
-    <div class="logo">
-      <span class="logo-gem">${ICON.core}</span>
-      <h1 class="logo-text" data-i18n="game.title"></h1>
-    </div>
-    <p class="tagline" data-i18n="game.tagline"></p>
-    <nav class="menu">
-      <button data-nav class="btn btn-primary" data-action="play"><span data-i18n="menu.play"></span></button>
-      <button data-nav class="btn" data-action="leaderboard"><span data-i18n="menu.leaderboard"></span></button>
-      <button data-nav class="btn" data-action="settings"><span data-i18n="menu.settings"></span></button>
-    </nav>
-  </div>
-  <footer class="bottom-bar"><div class="prompts"></div><small data-i18n="credits.fonts"></small></footer>
-</section>
-
-<section class="screen screen-hud" data-screen="hud">
-  <div class="hurt-vignette"></div>
-  <div class="popups"></div>
-  <div class="hud-top-left">
-    <div class="hud-panel hud-cores"><span class="hud-core-icon">${ICON.core}</span><b data-slot="cores"></b></div>
-    <div class="hud-score"><span data-i18n="hud.score"></span><b data-slot="score"></b></div>
-  </div>
-  <div class="hud-top-center">
-    <div class="hud-clock"><b data-slot="clock"></b></div>
-    <div class="hud-compass"><span class="hud-compass-arrow">${ICON.arrow}</span><b data-slot="distance"></b></div>
-  </div>
-  <div class="hud-top-right">
-    <div class="hud-cells">${`<span class="hud-cell">${ICON.cell}</span>`.repeat(CONFIG.run.lives)}</div>
-    <button class="hud-pause" data-action="pause" data-i18n-label="touch.pause">${ICON.pause}</button>
-  </div>
-  <div class="hud-combo"><b data-slot="combo"></b><span data-i18n="hud.combo"></span><div class="hud-combo-bar"><i></i></div></div>
-  <div class="banner"></div>
-  <div class="hint"><span></span></div>
-  <div class="touch">
-    <div class="touch-stick"><i></i></div>
-    <button class="touch-btn touch-dash" data-touch="dash"><span data-i18n="touch.dash"></span></button>
-    <button class="touch-btn touch-jump" data-touch="jump"><span data-i18n="touch.jump"></span></button>
-  </div>
-</section>
-
-<section class="screen screen-pause screen-modal" data-screen="pause">
-  <div class="modal">
-    <h2 class="modal-title" data-i18n="pause.title"></h2>
-    <nav class="menu">
-      <button data-nav class="btn btn-primary" data-action="resume"><span data-i18n="menu.continue"></span></button>
-      <button data-nav class="btn" data-action="restart"><span data-i18n="menu.restart"></span></button>
-      <button data-nav class="btn" data-action="settings"><span data-i18n="menu.settings"></span></button>
-      <button data-nav class="btn" data-action="quit"><span data-i18n="menu.quit"></span></button>
-    </nav>
-  </div>
-  <footer class="bottom-bar"><div class="prompts"></div></footer>
-</section>
-
-<section class="screen screen-settings screen-modal" data-screen="settings">
-  <div class="modal modal-wide">
-    <h2 class="modal-title" data-i18n="settings.title"></h2>
-    <div class="settings-grid">
-      <fieldset><legend data-i18n="settings.audio"></legend>
-        ${range('musicVolume', 'settings.music', 0, 1, 0.05)}
-        ${range('sfxVolume', 'settings.sfx', 0, 1, 0.05)}
-        ${toggle('muted', 'settings.mute')}
-      </fieldset>
-      <fieldset><legend data-i18n="settings.controls"></legend>
-        ${range('sensitivity', 'settings.sensitivity', 0.2, 3, 0.1)}
-        ${toggle('invertY', 'settings.invertY')}
-      </fieldset>
-      <fieldset><legend data-i18n="settings.display"></legend>
-        <div class="row"><span data-i18n="settings.quality"></span><div class="seg" data-setting="quality">
-          <button data-nav data-value="low" data-i18n="settings.quality.low"></button><button data-nav data-value="medium" data-i18n="settings.quality.medium"></button><button data-nav data-value="high" data-i18n="settings.quality.high"></button>
-        </div></div>
-        ${toggle('reducedMotion', 'settings.reducedMotion')}
-        <div class="row"><span data-i18n="settings.language"></span><div class="seg" data-setting="locale">
-          <button data-nav data-value="en" lang="en">English</button><button data-nav data-value="zh-CN" lang="zh-CN">简体中文</button>
-        </div></div>
-      </fieldset>
-    </div>
-    <nav class="menu menu-row"><button data-nav class="btn" data-action="back"><span data-i18n="menu.back"></span></button></nav>
-  </div>
-  <footer class="bottom-bar"><div class="prompts"></div></footer>
-</section>
-
-<section class="screen screen-leaderboard screen-modal" data-screen="leaderboard">
-  <div class="modal">
-    <h2 class="modal-title" data-i18n="leaderboard.title"></h2>
-    <div class="board-head"><b>#</b><span></span><span data-i18n="leaderboard.time"></span><em data-i18n="leaderboard.score"></em></div>
-    <ol class="board"></ol>
-    <nav class="menu menu-row"><button data-nav class="btn" data-action="back"><span data-i18n="menu.back"></span></button></nav>
-  </div>
-  <footer class="bottom-bar"><div class="prompts"></div></footer>
-</section>
-
-<section class="screen screen-results screen-modal" data-screen="results">
-  <div class="modal modal-results">
-    <div class="results-stars">${`<span class="star">${ICON.star}</span>`.repeat(3)}</div>
-    <h2 class="results-title modal-title"></h2>
-    <div class="results-best" data-i18n="results.newBest"></div>
-    <dl class="results-table">
-      <div><dt data-i18n="results.cores"></dt><dd class="r-cores"></dd><dd class="r-core-score"></dd></div>
-      <div><dt data-i18n="results.time"></dt><dd class="r-time"></dd><dd></dd></div>
-      <div class="r-bonus"><dt data-i18n="results.timeBonus"></dt><dd></dd><dd class="r-time-bonus"></dd></div>
-      <div class="r-bonus"><dt data-i18n="results.lifeBonus"></dt><dd></dd><dd class="r-life-bonus"></dd></div>
-      <div class="r-total-row"><dt data-i18n="results.total"></dt><dd></dd><dd class="r-total"></dd></div>
-    </dl>
-    <div class="results-save">
-      <input data-nav class="results-name" type="text" maxlength="16" autocomplete="off" spellcheck="false" data-i18n-placeholder="results.name">
-      <button data-nav class="btn btn-small" data-action="save-score"><span data-i18n="results.save"></span></button>
-      <span class="results-saved" data-i18n="results.saved"></span>
-      <span class="results-rank"></span>
-    </div>
-    <nav class="menu menu-row">
-      <button data-nav class="btn btn-primary" data-action="restart"><span data-i18n="results.retry"></span></button>
-      <button data-nav class="btn" data-action="quit"><span data-i18n="results.title"></span></button>
-    </nav>
-  </div>
-</section>`
+  /** Show or hide the in-game HUD (hidden behind the title screen). */
+  setHudVisible(visible: boolean): void {
+    this.root.classList.toggle('hud-hidden', !visible)
   }
 }

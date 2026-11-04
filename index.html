@@ -3,14 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-    <meta name="theme-color" content="#1b1838" />
+    <meta name="theme-color" content="#0b3a5c" />
+    <meta name="description" content="Ocean Reclaimers - a casual arcade ocean-cleanup game. Scoop up floating plastic, unload at the station and upgrade your boat to clear Coral Bay." />
     <title>Ocean Reclaimers</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="preload" href="./fonts/ManusCC0-Bold.ttf" as="font" type="font/ttf" crossorigin />
-    <link rel="preload" href="./fonts/ManusCC0-Regular.ttf" as="font" type="font/ttf" crossorigin />
+    <style>
+      #boot{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0b3a5c;color:#fff;font-family:system-ui,sans-serif;transition:opacity .5s}
+      #boot.done{opacity:0;pointer-events:none}
+      #boot img{width:72px;height:72px;border-radius:16px}
+      #boot h1{margin:0;font-size:28px;letter-spacing:.04em}
+      #boot .bar{width:220px;height:8px;border-radius:6px;background:#ffffff26;overflow:hidden}
+      #boot .bar i{display:block;height:100%;width:40%;border-radius:6px;background:#5ee0e8;animation:bootbar 1.1s ease-in-out infinite}
+      @keyframes bootbar{0%{transform:translateX(-100%)}100%{transform:translateX(260%)}}
+    </style>
   </head>
   <body>
-    <canvas id="game"></canvas>
+    <div id="boot"><img src="./favicon.svg" alt="" /><h1>Ocean Reclaimers</h1><div class="bar"><i></i></div></div>
+    <div id="game-root"></div>
     <div id="ui"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "title": "Ocean Reclaimers",
+  "description": "A casual top-down arcade ocean-cleanup game. Sail a small boat around Coral Bay, scoop up floating plastic, unload at the station, upgrade your vessel and bring the bay back to life. A fictional, simplified game.",
+  "defaultCaptions": {
+    "x": "Ocean Reclaimers: scoop plastic, chain combos and clear Coral Bay in this cozy arcade cleanup game.",
+    "facebook": "Play Ocean Reclaimers, a cozy arcade game about cleaning up Coral Bay one bottle at a time.",
+    "reddit": "Ocean Reclaimers - a small browser arcade game where you sail, scoop plastic, upgrade your boat and revive a bay.",
+    "discord": "Ocean Reclaimers is playable in the browser: sail, collect, combo, upgrade, and clear Coral Bay."
+  },
+  "assets": { "favicon": "assets/share/favicon.png" }
+}
