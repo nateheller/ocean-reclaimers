@@ -8,7 +8,7 @@ const uiRoot = document.getElementById('ui') as HTMLElement
 
 // Placeholder handlers; the scene installs the real ones when it is created.
 const ui = new GameUI(uiRoot, {
-  onPlay() {}, onContinue() {}, onNewGame() {}, onResume() {}, onMute() {}, onBuy() {}, onUndock() {}, onKeepSailing() {},
+  onPlay() {}, onContinue() {}, onNewGame() {}, onResume() {}, onMute() {}, onBuy() {}, onUndock() {}, onKeepSailing() {}, onSubmitScore() {}, onShowScores() {},
 })
 
 /** Render-resolution multiplier; lowered automatically on slow GPUs. */

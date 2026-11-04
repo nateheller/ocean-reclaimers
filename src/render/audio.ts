@@ -1,7 +1,7 @@
 /** Fully synthesized audio (Web Audio): ambience, engine hum and sound effects. No audio files. */
 import { BALANCE } from '../config/balance'
 
-type SfxName = 'collect' | 'net' | 'splash' | 'bump' | 'full' | 'unload' | 'coin' | 'upgrade' | 'milestone' | 'click' | 'boost' | 'dock' | 'denied' | 'combo' | 'request' | 'transfer' | 'deliver' | 'notice'
+type SfxName = 'collect' | 'net' | 'splash' | 'bump' | 'full' | 'unload' | 'coin' | 'upgrade' | 'milestone' | 'click' | 'boost' | 'dock' | 'denied' | 'combo' | 'request' | 'transfer' | 'deliver' | 'notice' | 'sonar' | 'trawl' | 'trawlerLaunch' | 'scoreSaved'
 
 // A major pentatonic ladder so chained pickups sound like a rising melody.
 const LADDER = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24]
@@ -250,6 +250,23 @@ export class AudioEngine {
         break
       case 'notice':
         this.tone(300, 0.09, 'triangle', 0.1)
+        break
+      case 'sonar':
+        // A soft submarine ping with a faint echo. arg = level (higher levels ping a little higher).
+        this.tone(740 + arg * 40, 0.5, 'sine', 0.1)
+        this.tone(740 + arg * 40, 0.6, 'sine', 0.045, 0.28)
+        break
+      case 'trawl':
+        // Quiet scoop: a short low whoosh, the trawlers are the supporting act.
+        this.noise(0.16, 1100, 0.7, 0.07, 'bandpass', 0, 420)
+        this.tone(300 + (arg % 4) * 30, 0.1, 'triangle', 0.045)
+        break
+      case 'trawlerLaunch':
+        this.noise(0.5, 900, 0.8, 0.2, 'bandpass', 0, 2200)
+        ;[0, 7, 12].forEach((s, i) => this.tone(392 * Math.pow(2, s / 12), 0.3, 'triangle', 0.16, 0.1 + i * 0.09))
+        break
+      case 'scoreSaved':
+        ;[0, 4, 7, 12].forEach((s, i) => this.tone(392 * Math.pow(2, s / 12), 0.4, 'triangle', 0.18, i * 0.08))
         break
       case 'milestone':
         ;[0, 4, 7, 11, 12, 16, 19, 24].forEach((s, i) => this.tone(262 * Math.pow(2, s / 12), 0.6, 'triangle', 0.2, i * 0.09))

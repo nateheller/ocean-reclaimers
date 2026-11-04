@@ -22,7 +22,12 @@ import {
   stepBoat,
   type BoatState,
 } from '../core/boat'
+import { alreadySubmitted, loadScores, markSubmitted, rankFor, STANDARD_BOARD, submitScore, topScores } from '../core/leaderboard'
 import { GameModel } from '../core/model'
+import { edgeIndicator, metres, type ViewRect } from '../core/navigation'
+import { timeBandLabel } from '../core/scoring'
+import { distanceLabel } from '../core/sensors'
+import { TRAWLER_STATUS_LABEL, type TrawlerEvent } from '../core/trawler'
 import { Rng, hashSeed } from '../core/rng'
 import { buildSave, clearSave, loadSave, loadSettings, writeSave, writeSettings } from '../core/save'
 import { TENDER_STATUS_LABEL, type TenderEvent } from '../core/tender'
@@ -32,10 +37,11 @@ import { AudioEngine } from '../render/audio'
 import { BoatView } from '../render/boatView'
 import { Input } from '../render/input'
 import { TENDER_STATUS_COLOR, TenderView } from '../render/tenderView'
+import { TRAWLER_STATUS_COLOR, TrawlerView } from '../render/trawlerView'
 import { TS, buildAllTextures } from '../render/textures'
 import { Wildlife } from '../render/wildlife'
 import { STATION_ART, bakeLandmass, bakeReef, bakeRock, bakeStation, buildDepthLayer } from '../render/worldart'
-import { GameUI } from '../ui/ui'
+import { GameUI, type EdgeMarkerView } from '../ui/ui'
 
 const D = {
   water: 0, caustic: 1, depth: 2, seabed: 3, wild: 4, murk: 5, land: 6, rock: 7, station: 8, ring: 8.5,
@@ -114,6 +120,15 @@ export class GameScene extends Phaser.Scene {
   private lastCargoKey = ''
   private upgradeHinted = false
   private tenderView!: TenderView
+  private trawlerView!: TrawlerView
+  /** Counts down (in playing time) to showing the completion panel after the 75% celebration. */
+  private pendingWinTimer = 0
+  private homeShown = false
+  private readonly arrowShown = new Map<string, boolean>()
+  private sensorReading: ReturnType<GameModel['readSensors']> = { arrows: [], minimap: [] }
+  private sensorTimer = 0
+  private sonarTimer = 0
+  private lastTrawlSfx = 0
   private tenderCalls = 0
   private lastDockUnload: { credits: number; items: number; units: number } | null = null
   private winShown = false
@@ -145,6 +160,8 @@ export class GameScene extends Phaser.Scene {
     this.boatView = new BoatView(this, D.boat)
     this.tenderView = new TenderView(this, D.boat - 0.3, D.text)
     this.tenderView.onWake = (x, y) => this.wake.emitParticleAt(x, y)
+    this.trawlerView = new TrawlerView(this, D.boat - 0.35, D.text)
+    this.trawlerView.onWake = (x, y) => this.wake.emitParticleAt(x, y)
     this.wildlife = new Wildlife(this, D.wild, D.dolphinJump)
     this.wildlife.onSplash = (x, y, big) => this.splashAt(x, y, big ? 14 : 6, true)
 
@@ -362,13 +379,15 @@ export class GameScene extends Phaser.Scene {
       onBuy: (id: UpgradeId) => this.buyUpgrade(id),
       onUndock: () => this.undock(),
       onKeepSailing: () => this.keepSailing(),
+      onSubmitScore: (name: string) => this.submitName(name),
+      onShowScores: () => this.showScores(null),
     })
   }
 
   private setupInput(): void {
     this.input_.onAnyKey = (code) => {
       this.audio.unlock()
-      if (this.mode === 'title' && (code === 'Enter' || code === 'Space')) this.startGame(this.hasSave)
+      if (this.mode === 'title' && (code === 'Enter' || code === 'Space') && !this.ui.scoresOpen) this.startGame(this.hasSave)
     }
     this.input.on('pointerdown', () => this.audio.unlock())
     window.addEventListener('pointerdown', () => this.audio.unlock())
@@ -424,8 +443,10 @@ export class GameScene extends Phaser.Scene {
     this.seabedAlpha = SEABED_ALPHA[level]
     this.applyClarity()
     this.wildlife.ensureTier(level, true)
-    this.winShown = this.model.completed
+    // A finished expedition whose score was never saved or declined offers the entry form again.
+    this.winShown = this.model.completed && this.model.completion?.entry !== 'pending'
     this.syncTenders(false)
+    this.syncTrawlers(false)
   }
 
   private startGame(continueSave: boolean): void {
@@ -436,6 +457,7 @@ export class GameScene extends Phaser.Scene {
     this.ui.setHudVisible(true)
     this.stationLabel.setVisible(true)
     if (continueSave) this.movedOnce = true
+    if (continueSave && this.model.completion?.entry === 'pending') this.pendingWinTimer = 1.4
     this.mode = 'playing'
     this.input_.flush()
     this.audio.play('dock')
@@ -445,6 +467,7 @@ export class GameScene extends Phaser.Scene {
 
   private newGame(): void {
     this.audio.unlock()
+    this.autoSubmitPending()
     clearSave(this.storage)
     this.hasSave = false
     this.tweens.resumeAll()
@@ -452,6 +475,7 @@ export class GameScene extends Phaser.Scene {
     this.resetWorld(true)
     this.ui.showPause(false)
     this.ui.hideWin()
+    this.ui.hideScores()
     this.ui.hideDock()
     this.ui.hideTitle()
     this.ui.setHudVisible(true)
@@ -481,13 +505,24 @@ export class GameScene extends Phaser.Scene {
     this.tenderCalls = 0
     this.tenderView.clear()
     this.ui.setTenders([])
+    this.trawlerView.clear()
+    this.ui.setTrawlers([])
+    this.pendingWinTimer = 0
+    this.homeShown = false
+    this.arrowShown.clear()
+    this.sensorReading = { arrows: [], minimap: [] }
+    this.sonarTimer = 0
+    this.ui.setEdgeMarkers([])
+    this.ui.minimap.setExpanded(false)
     if (announce) this.ui.toast('Fresh start', 'Coral Bay is waiting')
   }
 
   private keepSailing(): void {
+    this.autoSubmitPending()
     this.ui.hideWin()
     this.mode = 'playing'
     this.input_.flush()
+    this.saveNow()
   }
 
   private saveNow(): void {
@@ -556,8 +591,134 @@ export class GameScene extends Phaser.Scene {
     this.floatText(this.boat.x, this.boat.y - 12, maxed && def.maxLevel > 1 ? 'MAX!' : def.effect(result.level), '#ffffff', 17)
     if (maxed && def.maxLevel > 1) this.ui.pop(`${def.name.toUpperCase()} MAXED`, 'pink')
     this.syncTenders(true)
+    this.syncTrawlers(true)
+    if (id === 'sonar') this.sonarPing(true)
     this.cameras.main.flash(180, 255, 245, 200, true)
     this.saveNow()
+  }
+
+  // ===========================================================================
+  // Sonar
+  // ===========================================================================
+
+  /** An expanding ring around the boat (and a quiet ping). Purely visual: the markers come from the sensor reading. */
+  private sonarPing(loud: boolean): void {
+    const level = this.model.upgrades.sonar
+    if (level <= 0) return
+    const R = Math.min(1500, 520 + level * 200)
+    const ring = this.sprite(this.boat.x, this.boat.y, 'ring', D.fx, 0.5).setAlpha(loud ? 0.8 : 0.4).setTint(0x3ee6c1)
+    this.tweens.addCounter({
+      from: 0,
+      to: 1,
+      duration: loud ? 1800 : 2600,
+      ease: 'Sine.easeOut',
+      onUpdate: (tw) => {
+        const t = tw.getValue() ?? 0
+        ring.setPosition(this.boat.x, this.boat.y)
+        ring.setScale(Phaser.Math.Linear(0.5, R / 128, t))
+        ring.setAlpha((loud ? 0.8 : 0.4) * (1 - t))
+      },
+      onComplete: () => ring.destroy(),
+    })
+    this.audio.play('sonar', level)
+  }
+
+  // ===========================================================================
+  // Auto trawlers
+  // ===========================================================================
+
+  /** Make the trawler views match the fleet; brand-new trawlers get a launch effect when `announce` is set. */
+  private syncTrawlers(announce: boolean): void {
+    const created = this.trawlerView.sync(this.model.trawlers.trawlers)
+    this.trawlerView.update(this.model.trawlers.trawlers, this.time.now, 0)
+    this.updateTrawlerChips()
+    if (!announce) return
+    for (const id of created) {
+      const pos = this.trawlerView.getPosition(id)
+      if (!pos) continue
+      this.splashAt(pos.x, pos.y, 16, true)
+      this.sparkle.explode(20, pos.x, pos.y)
+      this.floatText(pos.x, pos.y - 34, 'Auto Trawler launched!', '#c59bff', 20)
+      this.audio.play('trawlerLaunch')
+    }
+  }
+
+  private runTrawlers(dt: number): void {
+    if (this.model.trawlers.count === 0) return
+    const { events, newMilestones } = this.model.updateTrawlers(dt, this.boat)
+    if (events.length) this.handleTrawlerEvents(events)
+    this.trawlerView.update(this.model.trawlers.trawlers, this.time.now, dt)
+    this.updateTrawlerChips()
+    if (newMilestones.length) {
+      this.ui.setProgress(this.model.progress)
+      for (const m of newMilestones) this.onMilestone(m)
+    }
+  }
+
+  private updateTrawlerChips(): void {
+    const cap = this.model.trawlerStats.capacity
+    this.ui.setTrawlers(
+      this.model.trawlers.trawlers.map((t, slot) => {
+        const units = t.cargo.bottle + t.cargo.container * 2 + t.cargo.net * 4
+        return { slot, label: TRAWLER_STATUS_LABEL[t.status], color: TRAWLER_STATUS_COLOR[t.status], load: units > 0 ? `${units}/${cap}` : '' }
+      }),
+    )
+  }
+
+  private handleTrawlerEvents(events: readonly TrawlerEvent[]): void {
+    for (const e of events) {
+      if (e.type === 'collected') {
+        const i = this.views.findIndex((v) => v.spawn.id === e.spawn.id)
+        if (i >= 0) {
+          const [v] = this.views.splice(i, 1)
+          this.suckIntoTrawler(v, e.trawler.id)
+        }
+        this.trawlerView.scoop(e.trawler.id)
+        this.splashAt(e.spawn.x, e.spawn.y, e.spawn.type === 'net' ? 10 : 5, false)
+        const now = performance.now()
+        if (now - this.lastTrawlSfx > 140) {
+          this.lastTrawlSfx = now
+          this.audio.play('trawl', e.trawler.collected)
+        }
+        this.ui.setProgress(this.model.progress)
+        this.saveTimer = Math.min(this.saveTimer, BALANCE.save.autosaveSeconds - 1.5)
+      } else if (e.type === 'delivered') {
+        this.audio.play('deliver')
+        this.audio.play('coin', 3)
+        this.floatText(330, 3020, `+${e.credits}`, '#d9c6ff', 26)
+        this.pulseStation()
+        this.ui.setCredits(this.model.credits)
+        this.ui.notice(`Trawler A${this.model.trawlers.trawlers.indexOf(e.trawler) + 1} delivered ${e.units} units  +${e.credits}`, 'good')
+        if (this.ui.dockOpen) this.ui.renderDock(this.dockData())
+        this.saveNow()
+      }
+    }
+  }
+
+  /** The scooped item is pulled into the trawler's hopper (following the moving hull) and shrinks away. */
+  private suckIntoTrawler(v: DebrisView, trawlerId: number): void {
+    v.foam.destroy()
+    v.shadow.destroy()
+    const sx = v.img.x
+    const sy = v.img.y
+    const s0 = v.baseScale
+    this.tweens.addCounter({
+      from: 0,
+      to: 1,
+      duration: 320,
+      ease: 'Cubic.easeIn',
+      onUpdate: (tw) => {
+        const t = tw.getValue() ?? 0
+        const pos = this.trawlerView.getPosition(trawlerId) ?? { x: sx, y: sy }
+        v.img.setPosition(Phaser.Math.Linear(sx, pos.x, t), Phaser.Math.Linear(sy, pos.y, t))
+        v.img.setScale(s0 * (1 + Math.sin(t * Math.PI) * 0.2) * (1 - t * 0.8))
+        v.img.setRotation(v.img.rotation + 0.2)
+        v.img.setAlpha(1 - t * 0.7)
+      },
+      onComplete: () => v.img.destroy(),
+    })
+    const ring = this.sprite(sx, sy, 'ring', D.fx, 0.18).setAlpha(0.7).setTint(0xc59bff)
+    this.tweens.add({ targets: ring, scale: 0.7, alpha: 0, duration: 480, ease: 'Cubic.easeOut', onComplete: () => ring.destroy() })
   }
 
   // ===========================================================================
@@ -832,18 +993,96 @@ export class GameScene extends Phaser.Scene {
     cam.flash(300, 200, 255, 245, true)
     if (m >= BALANCE.progress.completion && !this.winShown) {
       this.winShown = true
-      this.time.delayedCall(3200, () => {
-        if (this.mode !== 'playing') return
-        this.mode = 'win'
-        this.ui.showWin({
-          score: this.model.score,
-          credits: this.model.credits,
-          minutes: Math.max(1, Math.round(this.model.playSeconds / 60)),
-          bestChain: this.model.combo.best,
-        })
-      })
+      // Give the celebration a moment, then show the result. The countdown only runs while playing, so it never
+      // opens over the shop or the pause menu.
+      this.pendingWinTimer = 3.2
     }
     this.saveNow()
+  }
+
+  // ===========================================================================
+  // Completion and high scores
+  // ===========================================================================
+
+  private showCompletion(): void {
+    const c = this.model.completion
+    if (!c || this.mode !== 'playing') return
+    const store = loadScores(this.storage)
+    const { rank, qualifies } = rankFor(store, c.finalScore)
+    const board = topScores(store)
+    const size = BALANCE.scoring.leaderboardSize
+    const duplicate = alreadySubmitted(store, c.runId)
+    const canEnter = c.entry === 'pending' && qualifies && !duplicate
+    if (!canEnter && c.entry === 'pending') {
+      // Nothing to enter: remember that this run was evaluated so it is never offered again.
+      c.entry = duplicate ? 'saved' : 'skipped'
+      markSubmitted(this.storage, c.runId)
+      this.saveNow()
+    }
+    this.mode = 'win'
+    this.ui.setPrompt(null)
+    this.ui.minimap.setExpanded(false)
+    this.ui.showWin({
+      timeSeconds: c.timeSeconds,
+      bandLabel: timeBandLabel(c.timeSeconds),
+      baseScore: c.baseScore,
+      multiplier: c.multiplier,
+      finalScore: c.finalScore,
+      credits: this.model.credits,
+      bestChain: c.bestChain,
+      qualifies: canEnter,
+      rank,
+      threshold: board.length >= size ? board[board.length - 1].finalScore + 1 : 0,
+      defaultName: store.lastName || 'CAPTAIN',
+      nameMaxLength: BALANCE.scoring.nameMaxLength,
+      note: duplicate ? 'This expedition is already on the leaderboard.' : undefined,
+    })
+  }
+
+  private submitName(name: string): void {
+    const c = this.model.completion
+    if (!c || c.entry !== 'pending') return
+    const res = submitScore(this.storage, { completion: c, name })
+    if (res.ok) {
+      c.entry = 'saved'
+      this.saveNow()
+      this.audio.play('scoreSaved')
+      this.ui.showScoreSaved({
+        rank: res.rank,
+        name: res.entry.name,
+        entryId: res.entry.id,
+        newPersonalBest: res.newPersonalBest,
+        previousBest: res.previousBest,
+        improvement: res.improvement,
+        entries: res.entries,
+      })
+      this.showScores(res.entry.id)
+    } else if (res.reason === 'duplicate') {
+      c.entry = 'saved'
+      this.ui.showScoreError('This expedition is already on the leaderboard.')
+    } else if (res.reason === 'not-qualified') {
+      c.entry = 'skipped'
+      this.ui.showScoreError('That score no longer makes the top 10.')
+    } else {
+      this.ui.showScoreError('Scores could not be saved on this device (browser storage is unavailable).')
+    }
+  }
+
+  /** Save a score that is still waiting for a name (Keep Sailing / New Game never lose a qualifying score). */
+  private autoSubmitPending(): void {
+    const c = this.model.completion
+    if (!c || c.entry !== 'pending' || this.mode !== 'win') return
+    const typed = this.ui.currentName()
+    if (typed === null) return
+    const store = loadScores(this.storage)
+    if (!rankFor(store, c.finalScore).qualifies) return
+    submitScore(this.storage, { completion: c, name: typed || store.lastName || 'CAPTAIN' })
+    c.entry = 'saved'
+  }
+
+  private showScores(highlightId: string | null): void {
+    const store = loadScores(this.storage)
+    this.ui.showScores({ title: 'Coral Bay \u2013 Standard run', entries: topScores(store, STANDARD_BOARD), highlightId })
   }
 
   private setClarity(level: number): void {
@@ -907,6 +1146,7 @@ export class GameScene extends Phaser.Scene {
     this.boatView.setCargo(this.model.cargo, this.model.capacity)
     this.refreshCargo(false)
     this.syncTenders(false)
+    this.syncTrawlers(false)
   }
 
   private updateHints(): void {
@@ -961,6 +1201,7 @@ export class GameScene extends Phaser.Scene {
       this.ui.setPrompt(null)
       this.stepBoatPhysics(dt, { throttle: 0, steer: 0, boost: false })
       this.runFleet(dt)
+      this.runTrawlers(dt)
       this.updateCamera(dt, false)
       return
     }
@@ -980,10 +1221,16 @@ export class GameScene extends Phaser.Scene {
         this.handleCollection()
         this.updateDockPrompt()
       } else {
-        // Docked: let the boat drift to a halt beside the station.
+        // Docked: let the boat drift to a halt beside the station. The run clock keeps going (the fleets are working).
+        this.model.advanceClock(dt)
         this.stepBoatPhysics(dt, { throttle: 0, steer: 0, boost: false })
       }
       this.runFleet(dt)
+      this.runTrawlers(dt)
+      if (this.pendingWinTimer > 0 && this.mode === 'playing') {
+        this.pendingWinTimer -= dt
+        if (this.pendingWinTimer <= 0) this.showCompletion()
+      }
       this.updateHud(dt)
       this.hintTimer -= dt
       if (this.hintTimer <= 0) {
@@ -1001,6 +1248,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleMenuKeys(): void {
+    if (this.ui.scoresOpen) {
+      // The high-score table is modal: Escape or Enter closes it and nothing else reacts.
+      if (this.input_.consume('Escape') || this.input_.consume('Enter')) this.ui.hideScores()
+      this.input_.flush()
+      return
+    }
     const esc = this.input_.consume('Escape')
     const e = this.input_.consume('KeyE')
     const enter = this.input_.consume('Enter')
@@ -1010,6 +1263,10 @@ export class GameScene extends Phaser.Scene {
         if (esc) this.setPaused(true)
         else if (e && inDockRange(this.boat)) this.dock()
         else if (r) this.callTender()
+        else if (this.input_.consume('Tab')) {
+          this.ui.minimap.toggle()
+          this.audio.play('click')
+        }
         break
       case 'paused':
         if (esc) this.setPaused(false)
@@ -1021,15 +1278,19 @@ export class GameScene extends Phaser.Scene {
         else if (this.input_.consume('Digit3')) this.buyUpgrade('width')
         else if (this.input_.consume('Digit4')) this.buyUpgrade('tender')
         else if (this.input_.consume('Digit5')) this.buyUpgrade('fleet')
+        else if (this.input_.consume('Digit6')) this.buyUpgrade('sonar')
+        else if (this.input_.consume('Digit7')) this.buyUpgrade('trawler')
+        else if (this.input_.consume('Digit8')) this.buyUpgrade('trawlerFleet')
         break
       case 'win':
+        // Enter inside the name field submits the form (the input module ignores keys typed into it).
         if (enter || esc) this.keepSailing()
         break
       default:
         break
     }
     // Number keys outside the dock are ignored.
-    this.input_.consume('Digit1'); this.input_.consume('Digit2'); this.input_.consume('Digit3'); this.input_.consume('Digit4'); this.input_.consume('Digit5')
+    for (const k of ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Tab']) this.input_.consume(k)
   }
 
   private stepBoatPhysics(dt: number, input: { throttle: number; steer: number; boost: boolean }): void {
@@ -1082,21 +1343,93 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateHud(dt: number): void {
-    void dt
     const now = this.clock
     this.ui.setCombo(this.model.combo.chain, this.model.combo.multiplier(), this.model.combo.remaining(now))
     this.ui.setBoost(boostReady(this.boat), boostCooldownFraction(this.boat), isBoosting(this.boat))
-    // Pointer to the station when far away or when the hold is getting full.
-    const dist = distanceToDock(this.boat)
-    const wantsHome = this.mode === 'playing' && dist > 650 && (this.model.cargoUsed / this.model.capacity >= 0.6 || dist > 1800)
-    if (wantsHome) {
-      this.ui.setHome(Math.atan2(WORLD.dock.y - this.boat.y, WORLD.dock.x - this.boat.x), dist)
-    } else this.ui.setHome(null, 0)
+    this.updateNavigation(dt)
     const key = `${this.model.cargoUsed}/${this.model.capacity}`
     if (key !== this.lastCargoKey) {
       this.lastCargoKey = key
       this.refreshCargo(false)
     }
+  }
+
+  /** Station arrow, sonar / assistance arrows and the minimap. Everything here is derived from live game state. */
+  private updateNavigation(dt: number): void {
+    const cam = this.cameras.main
+    const wv = cam.worldView
+    const view: ViewRect = { x: wv.x, y: wv.y, width: wv.width, height: wv.height }
+    const screen = { width: window.innerWidth, height: window.innerHeight }
+    const insets = this.ui.edgeInsets()
+    const markers: EdgeMarkerView[] = []
+
+    // Sensor reading (sonar + late-game assistance) refreshed ten times a second.
+    this.sensorTimer -= dt
+    if (this.sensorTimer <= 0) {
+      this.sensorTimer = 0.1
+      this.sensorReading = this.model.readSensors(this.boat)
+    }
+    const profile = this.model.sensors
+
+    if (this.mode === 'playing') {
+      // The station: shown whenever it is off screen, wherever you are (no distance cut-off), hidden once it is
+      // clearly in view or you are within docking range.
+      const dist = distanceToDock(this.boat)
+      const home = edgeIndicator(WORLD.dock, view, screen, { clearMargin: 80, hysteresis: 50, wasShown: this.homeShown, insets })
+      this.homeShown = home.show
+      const homePos = { x: home.x, y: home.y }
+      if (home.show && !inDockRange(this.boat)) {
+        markers.push({ key: 'home', kind: 'home', x: home.x, y: home.y, angle: home.angle, label: `Station ${metres(dist)} m` })
+      }
+      // Debris arrows.
+      let slot = 0
+      for (const m of this.sensorReading.arrows) {
+        const ind = edgeIndicator({ x: m.x, y: m.y }, view, screen, {
+          clearMargin: 70,
+          hysteresis: 40,
+          wasShown: this.arrowShown.get(m.key) ?? false,
+          insets,
+        })
+        this.arrowShown.set(m.key, ind.show)
+        if (!ind.show) continue
+        // Do not stack on top of the station arrow.
+        if (home.show && Math.hypot(ind.x - homePos.x, ind.y - homePos.y) < 64) continue
+        markers.push({
+          key: `d:${m.key}`,
+          kind: profile.source === 'assist' ? 'assist' : 'sonar',
+          x: ind.x,
+          y: ind.y,
+          angle: ind.angle,
+          label: profile.subtle ? '' : distanceLabel(m.distance, profile.precision),
+          subtle: profile.subtle,
+        })
+        slot += 1
+      }
+      void slot
+      // Sonar pulse rings (purchased sonar only).
+      if (profile.pulse) {
+        this.sonarTimer += dt
+        if (this.sonarTimer >= BALANCE.upgrades.sonar.pulseSeconds) {
+          this.sonarTimer = 0
+          this.sonarPing(false)
+        }
+      }
+    } else {
+      this.homeShown = false
+    }
+    this.ui.setEdgeMarkers(markers)
+
+    this.ui.minimap.update(
+      {
+        boat: { x: this.boat.x, y: this.boat.y, heading: this.boat.heading },
+        view,
+        station: WORLD.dock,
+        markers: this.sensorReading.minimap,
+        tenders: this.model.fleet.tenders.map((t) => ({ x: t.x, y: t.y })),
+        trawlers: this.model.trawlers.trawlers.map((t) => ({ x: t.x, y: t.y })),
+      },
+      performance.now() / 1000,
+    )
   }
 
   private checkZone(): void {

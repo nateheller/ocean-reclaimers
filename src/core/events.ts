@@ -19,6 +19,8 @@ export type GameEvent =
   | { type: 'tenderDispatched'; tenderId: number; auto: boolean }
   | { type: 'tenderLoaded'; tenderId: number; units: number }
   | { type: 'tenderDelivered'; tenderId: number; units: number; credits: number; counts: CargoCounts }
+  | { type: 'trawlerCollected'; trawlerId: number; debris: DebrisType; units: number }
+  | { type: 'trawlerDelivered'; trawlerId: number; units: number; credits: number; counts: CargoCounts }
 
 export interface RunStats {
   collected: Record<DebrisType, number>
@@ -31,8 +33,12 @@ export interface RunStats {
   tenderDeliveries: number
   tenderUnits: number
   tenderCredits: number
-  /** Reserved for the future Auto Trawler feature. */
+  /** Trawlers launched (one per trawler owned). */
   trawlerDeployments: number
+  trawlerCollected: number
+  trawlerDeliveries: number
+  trawlerUnits: number
+  trawlerCredits: number
 }
 
 export function emptyRunStats(): RunStats {
@@ -48,6 +54,10 @@ export function emptyRunStats(): RunStats {
     tenderUnits: 0,
     tenderCredits: 0,
     trawlerDeployments: 0,
+    trawlerCollected: 0,
+    trawlerDeliveries: 0,
+    trawlerUnits: 0,
+    trawlerCredits: 0,
   }
 }
 
@@ -73,6 +83,15 @@ export function applyEvent(stats: RunStats, e: GameEvent): void {
       stats.tenderDeliveries += 1
       stats.tenderUnits += e.units
       stats.tenderCredits += e.credits
+      stats.creditsEarned += e.credits
+      break
+    case 'trawlerCollected':
+      stats.trawlerCollected += 1
+      break
+    case 'trawlerDelivered':
+      stats.trawlerDeliveries += 1
+      stats.trawlerUnits += e.units
+      stats.trawlerCredits += e.credits
       stats.creditsEarned += e.credits
       break
     default:

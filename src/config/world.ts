@@ -40,7 +40,7 @@ export const WORLD = {
   height: 3600,
   /** Master seed for debris scatter and decorations. */
   seed: 20301,
-  /** Boat spawn and dock interaction point (in open water beside the station). */
+  /** Boat spawn and dock interaction point: the mouth of the docking slip between the jetties. Navigation aids point here. */
   spawn: { x: 880, y: 3010, heading: -0.45 },
   dock: { x: 700, y: 3020 },
   /** Distance from the dock that bounds each area. */

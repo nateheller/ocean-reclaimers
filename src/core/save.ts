@@ -5,11 +5,14 @@ import type { BoatState } from './boat'
 import { cargoUnits, emptyCargo, type CargoCounts } from './cargo'
 import { emptyRunStats, type RunStats } from './events'
 import type { GameModel, ModelSnapshot } from './model'
+import { makeRunId, roundTime, type Completion } from './scoring'
 import { vesselStats } from './stats'
 import type { TenderSnapshot, TenderStatus } from './tender'
+import type { TrawlerSnapshot, TrawlerStatus } from './trawler'
 import { noUpgrades, sanitizeLevels, UPGRADE_IDS, type UpgradeLevels } from './upgrades'
-/** v1 = single-purchase upgrades (prototype). v2 = five-level upgrades + cargo tenders. */
-export const SAVE_VERSION = 2
+/** v1 = single-purchase upgrades (prototype). v2 = five-level upgrades + cargo tenders. v3 = sonar, trawlers, scoring. */
+export const SAVE_VERSION = 3
+const TRAWLER_STATUSES: readonly TrawlerStatus[] = ['searching', 'collecting', 'returning', 'unloading', 'departing']
 const TENDER_STATUSES: readonly TenderStatus[] = ['idle', 'toPlayer', 'loading', 'delivering', 'unloading', 'returning']
 
 export interface SaveData {
@@ -100,6 +103,54 @@ function readTenders(raw: unknown): TenderSnapshot[] | null {
   return out
 }
 
+function readTrawlers(raw: unknown): TrawlerSnapshot[] | null {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw) || raw.length > BALANCE.trawler.maxTrawlers) return null
+  const maxUnits = Math.max(...BALANCE.upgrades.trawler.capacity)
+  const out: TrawlerSnapshot[] = []
+  const ids = new Set<number>()
+  for (const t of raw) {
+    if (!isRecord(t)) return null
+    const cargo = readCargo(t.cargo)
+    if (!cargo || cargoUnits(cargo) > maxUnits) return null
+    if (!Number.isInteger(t.id) || ids.has(t.id as number)) return null
+    if (!isNum(t.x) || !isNum(t.y) || !isNum(t.heading)) return null
+    if (!TRAWLER_STATUSES.includes(t.status as TrawlerStatus)) return null
+    ids.add(t.id as number)
+    out.push({
+      id: t.id as number,
+      x: Math.min(Math.max(t.x, 0), WORLD.width),
+      y: Math.min(Math.max(t.y, 0), WORLD.height),
+      heading: t.heading,
+      status: t.status as TrawlerStatus,
+      cargo,
+      deliveries: nonNeg(t.deliveries) ? Math.floor(t.deliveries) : 0,
+      collected: nonNeg(t.collected) ? Math.floor(t.collected) : 0,
+    })
+  }
+  return out
+}
+
+const ENTRY_STATES: readonly Completion['entry'][] = ['pending', 'saved', 'skipped', 'legacy']
+
+/** A saved completion record, or null if it is missing or untrustworthy (the run is then simply not scored). */
+function readCompletion(raw: unknown): Completion | null {
+  if (!isRecord(raw)) return null
+  if (typeof raw.runId !== 'string' || raw.runId.length === 0 || raw.runId.length > 64) return null
+  if (!nonNeg(raw.timeSeconds) || !nonNeg(raw.baseScore) || !nonNeg(raw.finalScore)) return null
+  if (!isNum(raw.multiplier) || raw.multiplier < 1) return null
+  if (!ENTRY_STATES.includes(raw.entry as Completion['entry'])) return null
+  return {
+    runId: raw.runId,
+    timeSeconds: roundTime(raw.timeSeconds),
+    baseScore: Math.floor(raw.baseScore),
+    multiplier: raw.multiplier,
+    finalScore: Math.floor(raw.finalScore),
+    bestChain: nonNeg(raw.bestChain) ? Math.floor(raw.bestChain) : 0,
+    entry: raw.entry as Completion['entry'],
+  }
+}
+
 function readStats(raw: unknown): RunStats {
   const stats = emptyRunStats()
   if (!isRecord(raw)) return stats
@@ -110,6 +161,7 @@ function readStats(raw: unknown): RunStats {
   for (const k of [
     'bestChain', 'unloads', 'creditsEarned', 'creditsSpent', 'upgradesBought',
     'tenderDispatches', 'tenderDeliveries', 'tenderUnits', 'tenderCredits', 'trawlerDeployments',
+    'trawlerCollected', 'trawlerDeliveries', 'trawlerUnits', 'trawlerCredits',
   ] as const) stats[k] = num(raw[k])
   return stats
 }
@@ -123,7 +175,7 @@ export function parseSave(raw: string | null, validIds?: ReadonlySet<number>): S
   } catch {
     return null
   }
-  if (!isRecord(json) || (json.version !== 1 && json.version !== 2) || json.seed !== WORLD.seed) return null
+  if (!isRecord(json) || (json.version !== 1 && json.version !== 2 && json.version !== 3) || json.seed !== WORLD.seed) return null
   const m = json.model
   const b = json.boat
   if (!isRecord(m) || !isRecord(b)) return null
@@ -143,6 +195,7 @@ export function parseSave(raw: string | null, validIds?: ReadonlySet<number>): S
     const levels = sanitizeLevels(m.upgrades)
     if (!levels) return null
     if (levels.fleet > 0 && levels.tender < BALANCE.upgrades.fleet.requiresTenderLevel) return null
+    if (levels.trawlerFleet > 0 && levels.trawler < BALANCE.upgrades.trawlerFleet.requiresTrawlerLevel) return null
     upgrades = levels
   }
   void UPGRADE_IDS
@@ -153,9 +206,15 @@ export function parseSave(raw: string | null, validIds?: ReadonlySet<number>): S
   if (!isNum(b.x) || !isNum(b.y) || !isNum(b.heading)) return null
   // Reject a saved hold that cannot exist with the saved upgrades.
   if (cargoUnits(cargo) > vesselStats(upgrades).capacity) return null
-  const tenders = json.version === 2 ? readTenders(m.tenders) : []
+  const tenders = json.version >= 2 ? readTenders(m.tenders) : []
   if (!tenders) return null
-  const stats = json.version === 2 ? readStats(m.stats) : emptyRunStats()
+  const trawlers = json.version >= 3 ? readTrawlers(m.trawlers) : []
+  if (!trawlers) return null
+  const stats = json.version >= 2 ? readStats(m.stats) : emptyRunStats()
+  // Older saves have no run id: the migrated run gets a fresh one. A finished older run has no completion record
+  // (its play time was not captured at the moment of completion), so it is never offered to the leaderboard.
+  const runId = typeof m.runId === 'string' && m.runId.length > 0 && m.runId.length <= 64 ? m.runId : makeRunId()
+  const completion = json.version >= 3 ? readCompletion(m.completion) : null
   const unloads = nonNeg(m.unloads) ? Math.floor(m.unloads) : 0
   return {
     version: SAVE_VERSION,
@@ -170,10 +229,13 @@ export function parseSave(raw: string | null, validIds?: ReadonlySet<number>): S
       milestones,
       unloads,
       bestChain: nonNeg(m.bestChain) ? Math.floor(m.bestChain) : 0,
-      playSeconds: nonNeg(m.playSeconds) ? Math.floor(m.playSeconds) : 0,
+      playSeconds: nonNeg(m.playSeconds) ? roundTime(m.playSeconds) : 0,
       completed: m.completed === true,
       tenders,
+      trawlers,
       stats,
+      runId,
+      completion,
     },
     boat: {
       x: Math.min(Math.max(b.x, 0), WORLD.width),

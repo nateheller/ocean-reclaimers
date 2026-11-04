@@ -6,6 +6,10 @@ import { noUpgrades, vesselStats, type UpgradeLevels } from '../core/stats'
 import { TS } from './textures'
 
 const TYPE_COLORS = { bottle: 0x6cc7ff, container: 0xff9b2e, net: 0x8fe05a }
+/** Where the sonar mast stands on the boat (local x; the hull runs from about -45 at the stern to +30 at the bow). */
+const SONAR_X = 7
+/** The mast is drawn at a small size and scaled up so it reads at game zoom. */
+const SONAR_SCALE = 1.6
 
 export class BoatView {
   readonly container: Phaser.GameObjects.Container
@@ -15,6 +19,8 @@ export class BoatView {
   private readonly hold: Phaser.GameObjects.Graphics
   private readonly engines: Phaser.GameObjects.Graphics
   private readonly flame: Phaser.GameObjects.Image
+  private readonly sonar: Phaser.GameObjects.Graphics
+  private readonly sweep: Phaser.GameObjects.Graphics
   private upgrades: UpgradeLevels = noUpgrades()
   private full = false
   private cargo: CargoCounts = { bottle: 0, container: 0, net: 0 }
@@ -27,7 +33,9 @@ export class BoatView {
     this.hold = scene.add.graphics()
     this.engines = scene.add.graphics()
     this.flame = scene.add.image(-40, 0, 'glow').setTint(0xffa43a).setScale(0.3).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD)
-    this.container = scene.add.container(0, 0, [this.arms, this.engines, this.hull, this.hold, this.flame]).setDepth(depth)
+    this.sonar = scene.add.graphics().setPosition(SONAR_X, 0).setScale(SONAR_SCALE)
+    this.sweep = scene.add.graphics().setPosition(SONAR_X, 0).setScale(SONAR_SCALE)
+    this.container = scene.add.container(0, 0, [this.arms, this.engines, this.hull, this.hold, this.sonar, this.sweep, this.flame]).setDepth(depth)
     this.redrawAll()
   }
 
@@ -36,10 +44,11 @@ export class BoatView {
     this.upgrades = { ...up }
     this.redrawAll()
     if (animate) {
-      const popped = (['cargo', 'engine', 'width'] as const).find((k) => up[k] > before[k])
-      const target = popped === 'width' ? this.arms : popped === 'engine' ? this.engines : this.hold
-      target.setScale(0.6)
-      this.scene.tweens.add({ targets: target, scaleX: 1, scaleY: 1, duration: 520, ease: 'Back.easeOut' })
+      const popped = (['cargo', 'engine', 'width', 'sonar'] as const).find((k) => up[k] > before[k])
+      const target = popped === 'width' ? this.arms : popped === 'engine' ? this.engines : popped === 'sonar' ? this.sonar : this.hold
+      const rest = target === this.sonar ? SONAR_SCALE : 1
+      target.setScale(rest * 0.6)
+      this.scene.tweens.add({ targets: target, scaleX: rest, scaleY: rest, duration: 520, ease: 'Back.easeOut' })
     }
   }
 
@@ -63,6 +72,7 @@ export class BoatView {
     this.shadow.setPosition(x + 4, y + 7).setRotation(heading)
     this.arms.setAlpha(0.88 + Math.sin(time * 0.004) * 0.12)
     this.flame.setAlpha(boosting ? 0.85 : 0).setScale(boosting ? 0.34 + Math.random() * 0.1 : 0.2)
+    if (this.upgrades.sonar >= 3) this.sweep.setRotation(time * (this.upgrades.sonar >= 5 ? 0.0052 : 0.0034))
     void speedRatio
   }
 
@@ -72,6 +82,51 @@ export class BoatView {
     this.drawArms()
     this.drawEngines()
     this.drawHold()
+    this.drawSonar()
+  }
+
+  /** The sonar mast: a whip aerial, then a dish, a twin dish with a light, a radome, and finally a scanning radome. */
+  private drawSonar(): void {
+    const g = this.sonar
+    const l = this.upgrades.sonar
+    g.clear()
+    this.sweep.clear()
+    this.sweep.setVisible(l >= 3)
+    if (l <= 0) return
+    // Mast base
+    g.fillStyle(0x000000, 0.22); g.fillCircle(0.8, 1.2, 3.4)
+    g.fillStyle(0x56707f, 1); g.fillCircle(0, 0, 3)
+    g.fillStyle(0xdfe9ef, 1); g.fillCircle(-0.5, -0.5, 1.5)
+    if (l === 1) {
+      g.lineStyle(1.3, 0xdfe9ef, 1); g.lineBetween(0, 0, -4, -5)
+      g.fillStyle(0x6cf0c1, 1); g.fillCircle(-4, -5, 1.4)
+    } else if (l === 2) {
+      g.lineStyle(2, 0x3ee6c1, 1); g.beginPath(); g.arc(1.5, 0, 5.5, -1.25, 1.25); g.strokePath()
+      g.lineStyle(1.3, 0xdfe9ef, 1); g.lineBetween(0, 0, 4.5, 0)
+      g.fillStyle(0x6cf0c1, 1); g.fillCircle(4.8, 0, 1.2)
+    } else if (l === 3) {
+      for (const sy of [-1, 1]) {
+        g.lineStyle(2, 0x3ee6c1, 1); g.beginPath(); g.arc(1.5, sy * 4, 5, -1.25, 1.25); g.strokePath()
+        g.fillStyle(0x6cf0c1, 1); g.fillCircle(4.5, sy * 4, 1.1)
+      }
+      g.fillStyle(0x7cff9a, 1); g.fillCircle(-2.5, 0, 1.3)
+    } else {
+      g.fillStyle(0xffffff, 0.9); g.fillCircle(0, 0, 6.2)
+      g.lineStyle(1.4, 0x3ee6c1, 1); g.strokeCircle(0, 0, 6.2)
+      g.lineStyle(1, 0x3ee6c1, 0.7); g.strokeCircle(0, 0, 3.4)
+      g.fillStyle(0x3ee6c1, 1); g.fillCircle(0, 0, 1.4)
+      if (l >= 5) {
+        g.lineStyle(1.6, 0xffd23f, 1); g.strokeCircle(0, 0, 8)
+        g.fillStyle(0xffd23f, 1); g.fillCircle(0, -8, 1.5); g.fillCircle(0, 8, 1.5)
+      }
+    }
+    if (l >= 3) {
+      const r = l >= 5 ? 26 : l === 4 ? 21 : 16
+      const w = this.sweep
+      w.fillStyle(0x7cf2ff, l >= 5 ? 0.34 : 0.26)
+      w.slice(0, 0, r, -0.65, 0, false); w.fillPath()
+      w.lineStyle(1.5, 0xbff7ff, 0.95); w.lineBetween(0, 0, r, 0)
+    }
   }
 
   private armPoint(side: number, t: number, hw: number, len: number): { x: number; y: number } {

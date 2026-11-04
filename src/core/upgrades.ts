@@ -1,5 +1,5 @@
 /**
- * Upgrade registry (v0.2).
+ * Upgrade registry (v0.2, extended in v0.3 with Ocean Sonar and Auto Trawlers).
  *
  * Every upgrade is a *track* with a max level, a price per level, an effect description per level and an optional
  * requirement. The gameplay model only stores `levels` (a plain id -> level record), so:
@@ -13,7 +13,8 @@ import { BALANCE, type UpgradeId } from '../config/balance'
 export type { UpgradeId }
 export type UpgradeLevels = Record<UpgradeId, number>
 
-export const UPGRADE_IDS: readonly UpgradeId[] = ['cargo', 'engine', 'width', 'tender', 'fleet']
+/** Display / hotkey order. Keys 1-5 keep their v0.2 meaning; 6-8 are new. */
+export const UPGRADE_IDS: readonly UpgradeId[] = ['cargo', 'engine', 'width', 'tender', 'fleet', 'sonar', 'trawler', 'trawlerFleet']
 
 export interface UpgradeContext {
   readonly levels: Readonly<UpgradeLevels>
@@ -24,7 +25,7 @@ export interface UpgradeContext {
 export interface UpgradeDef {
   readonly id: UpgradeId
   readonly name: string
-  readonly category: 'vessel' | 'fleet'
+  readonly category: 'vessel' | 'fleet' | 'explore'
   /** Free-form labels for future synergy / random-offer systems. */
   readonly tags: readonly string[]
   readonly maxLevel: number
@@ -107,10 +108,62 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
         ? `Needs Cargo Tender level ${BALANCE.upgrades.fleet.requiresTenderLevel}`
         : null,
   },
+  sonar: {
+    id: 'sonar',
+    name: BALANCE.upgrades.sonar.name,
+    category: 'explore',
+    tags: ['explore', 'sonar'],
+    maxLevel: BALANCE.upgrades.sonar.baseCosts.length,
+    cost: (l) => price(BALANCE.upgrades.sonar.baseCosts, l),
+    effect: (l) => {
+      const S = BALANCE.upgrades.sonar
+      const name = S.levelNames[Math.min(Math.max(l, 0), S.levelNames.length - 1)]
+      if (l <= 0) return 'Debris located by sight'
+      const detail = [
+        '',
+        'arrow to nearby concentrations',
+        '3 arrows, longer range',
+        'concentrations on the minimap',
+        'whole bay revealed',
+        'finds isolated debris',
+      ][l]
+      return `${name}: ${detail}`
+    },
+  },
+  trawler: {
+    id: 'trawler',
+    name: BALANCE.upgrades.trawler.name,
+    category: 'fleet',
+    tags: ['fleet', 'trawler', 'autonomous'],
+    maxLevel: BALANCE.upgrades.trawler.baseCosts.length,
+    cost: (l) => price(BALANCE.upgrades.trawler.baseCosts, l),
+    effect: (l) => {
+      const T = BALANCE.upgrades.trawler
+      if (l <= 0) return 'No trawler yet'
+      const parts = [`holds ${T.capacity[l]}`]
+      if (l === 3) parts.push('faster scooping')
+      if (l === 4) parts.push('wider search, smarter routes')
+      if (l === 5) parts.push('peak efficiency')
+      return parts.join(', ')
+    },
+  },
+  trawlerFleet: {
+    id: 'trawlerFleet',
+    name: BALANCE.upgrades.trawlerFleet.name,
+    category: 'fleet',
+    tags: ['fleet', 'trawler', 'autonomous'],
+    maxLevel: BALANCE.upgrades.trawlerFleet.baseCosts.length,
+    cost: (l) => price(BALANCE.upgrades.trawlerFleet.baseCosts, l),
+    effect: (l) => (l <= 0 ? 'One trawler' : 'Two trawlers'),
+    requirement: (ctx) =>
+      ctx.levels.trawler < BALANCE.upgrades.trawlerFleet.requiresTrawlerLevel
+        ? `Needs Auto Trawler level ${BALANCE.upgrades.trawlerFleet.requiresTrawlerLevel}`
+        : null,
+  },
 }
 
 export function noUpgrades(): UpgradeLevels {
-  return { cargo: 0, engine: 0, width: 0, tender: 0, fleet: 0 }
+  return { cargo: 0, engine: 0, width: 0, tender: 0, fleet: 0, sonar: 0, trawler: 0, trawlerFleet: 0 }
 }
 
 export function totalCost(id: UpgradeId): number {

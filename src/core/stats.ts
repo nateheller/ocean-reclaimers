@@ -50,3 +50,36 @@ export function tenderStats(levels: Readonly<UpgradeLevels>): TenderStats {
     autoDispatch: lvl >= T.autoDispatchLevel,
   }
 }
+
+export interface TrawlerStats {
+  /** How many trawlers the fleet owns. */
+  readonly count: number
+  readonly capacity: number
+  /** Travel speed (px/s). */
+  readonly speed: number
+  /** Seconds to scoop one item. */
+  readonly collectSeconds: number
+  /** Reach (px) for scooping an item. */
+  readonly collectRadius: number
+  /** How far (px) a trawler searches for debris from where it is. */
+  readonly detectRange: number
+  /** Route efficiency bias (see BALANCE.upgrades.trawler.routeBias). */
+  readonly routeBias: number
+  readonly unloadSeconds: number
+}
+
+export function trawlerStats(levels: Readonly<UpgradeLevels>): TrawlerStats {
+  const T = BALANCE.upgrades.trawler
+  const lvl = Math.max(0, Math.min(levels.trawler, T.capacity.length - 1))
+  const count = lvl <= 0 ? 0 : Math.min(BALANCE.trawler.maxTrawlers, 1 + levels.trawlerFleet)
+  return {
+    count,
+    capacity: T.capacity[lvl],
+    speed: T.speed[lvl],
+    collectSeconds: T.collectSeconds[lvl],
+    collectRadius: T.collectRadius[lvl],
+    detectRange: T.detectRange[lvl],
+    routeBias: T.routeBias[lvl],
+    unloadSeconds: T.unloadSeconds[lvl],
+  }
+}

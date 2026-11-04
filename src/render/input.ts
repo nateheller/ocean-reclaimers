@@ -2,8 +2,12 @@
 
 const GAME_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
-  'KeyE', 'Escape', 'KeyM', 'Digit1', 'Digit2', 'Digit3', 'Enter',
+  'KeyE', 'KeyR', 'Escape', 'KeyM', 'Enter',
+  'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8',
 ])
+
+/** Typing in the high-score name field must never steer the boat, buy upgrades or close the panel. */
+const isTextTarget = (t: EventTarget | null): boolean => t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement
 
 export class Input {
   private down = new Set<string>()
@@ -14,7 +18,10 @@ export class Input {
   constructor() {
     window.addEventListener('keydown', (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (isTextTarget(e.target)) return
       if (GAME_KEYS.has(e.code)) e.preventDefault()
+      // Tab toggles the minimap, but only when it is not being used to move between buttons.
+      if (e.code === 'Tab' && (document.activeElement === document.body || document.activeElement === null)) e.preventDefault()
       if (!e.repeat) this.pressed.add(e.code)
       this.down.add(e.code)
       this.onAnyKey?.(e.code)

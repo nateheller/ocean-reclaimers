@@ -4,6 +4,7 @@ import { WORLD } from '../src/config/world'
 import { boostReady, createBoat, distanceToDock, inCollectionZone, inDockRange, resolveCollisions, stepBoat } from '../src/core/boat'
 import { GameModel } from '../src/core/model'
 import { worldNav } from '../src/core/navmap'
+import { finalScore, timeMultiplier } from '../src/core/scoring'
 import { UPGRADES } from '../src/core/upgrades'
 import { buildObstacles, generateDebris } from '../src/core/worldgen'
 
@@ -20,7 +21,17 @@ interface Purchase {
   cost: number
 }
 
-export function simulate(skill: number, useTenders: boolean, maxMinutes = 30, trace?: (line: string) => void) {
+/** A purchasing plan: buy these in this order (id, up to level). Saves up for the first affordable-soon item. */
+export type Plan = ReadonlyArray<readonly [UpgradeId, number]>
+
+export function simulate(
+  skill: number,
+  useTenders: boolean,
+  maxMinutes = 30,
+  trace?: (line: string) => void,
+  useTrawlers = false,
+  plan?: Plan,
+) {
   const spawns = generateDebris()
   const obstacles = buildObstacles()
   const m = new GameModel(spawns)
@@ -50,13 +61,38 @@ export function simulate(skill: number, useTenders: boolean, maxMinutes = 30, tr
     return best < 0 ? null : best
   }
   const shop = () => {
+    if (plan) {
+      // Follow the plan strictly: buy the first listed item that is available; if it is merely unaffordable, save up.
+      for (let guard = 0; guard < 40; guard++) {
+        let bought = false
+        for (const [id, upTo] of plan) {
+          const level = m.upgrades[id]
+          if (level >= upTo) continue
+          const check = m.canBuy(id)
+          if (!check.ok) {
+            if (check.reason === 'poor') return
+            continue // locked (e.g. needs more station visits) or maxed: move on to the next item in the plan
+          }
+          const r = m.buy(id)
+          if (!r.ok) return
+          buys.push({ t, progress: m.progress, id, level: r.level, cost: r.cost })
+          bought = true
+          break
+        }
+        if (!bought) return
+      }
+      return
+    }
     for (;;) {
-      const options = (['tender', 'fleet', 'cargo', 'engine', 'width'] as UpgradeId[])
+      const ids: UpgradeId[] = ['tender', 'fleet', 'cargo', 'engine', 'width']
+      if (useTrawlers) ids.push('trawler', 'trawlerFleet', 'sonar')
+      const options = ids
         .map((id) => ({ id, check: m.canBuy(id) }))
         .filter((o) => o.check.ok)
       if (options.length === 0) return
       // Fleet logistics first when affordable, otherwise the cheapest improvement.
-      options.sort((a, b) => (a.id === 'tender' ? -1 : b.id === 'tender' ? 1 : a.check.cost - b.check.cost))
+      const rank = (id: UpgradeId) => (id === 'tender' ? 0 : id === 'trawler' ? 1 : id === 'sonar' ? 3 : 2)
+      options.sort((a, b) => rank(a.id) - rank(b.id) || a.check.cost - b.check.cost)
       const pickd = options[0]
       const r = m.buy(pickd.id)
       if (!r.ok) return
@@ -75,6 +111,7 @@ export function simulate(skill: number, useTenders: boolean, maxMinutes = 30, tr
       trace(`${t.toFixed(0)}s prog ${(m.progress * 100).toFixed(1)}% boat ${Math.round(boat.x)},${Math.round(boat.y)} ret ${returning} tgt ${target} hold ${m.cargoUsed}/${m.capacity} cr ${m.credits} tenders ${m.fleet.tenders.map((x) => x.status + ':' + Math.round(x.x) + ',' + Math.round(x.y)).join(' ')}`)
     }
     m.tick(t, dt)
+    if (useTrawlers) m.updateTrawlers(dt, boat)
     if (useTenders) {
       const ev = m.updateFleet(dt, boat)
       if (ev.some((e) => e.type === 'delivered')) tenderTrips += 1
@@ -153,6 +190,16 @@ function report(label: string, r: ReturnType<typeof simulate>): string {
   return `${label}: ${(r.t / 60).toFixed(1)} min to ${(r.progress * 100).toFixed(0)}%, ${r.buys.length} purchases, ${r.tenderTrips} tender deliveries, ${r.stationTrips} station trips, credits left ${r.credits}\n${lines.join('\n')}`
 }
 
+describe('pacing with trawlers (greedy bot)', () => {
+  const full = simulate(0.85, true, 30, undefined, true)
+  // eslint-disable-next-line no-console
+  console.log(report('with tenders + trawlers + sonar', full))
+  it('still finishes, and trawlers shorten the expedition without replacing the player', () => {
+    expect(full.progress).toBeGreaterThanOrEqual(0.75)
+    expect(full.model.trawlers.count).toBeLessThanOrEqual(2)
+  }, 120_000)
+})
+
 describe('pacing (greedy bot)', () => {
   const withTenders = simulate(0.85, true)
   const without = simulate(0.85, false)
@@ -185,5 +232,85 @@ describe('pacing (greedy bot)', () => {
   it('lets tenders genuinely cut down on station trips', () => {
     expect(withTenders.tenderTrips).toBeGreaterThan(3)
     expect(withTenders.stationTrips).toBeLessThan(without.stationTrips)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// Purchasing-strategy comparison. These are bot results (omniscient target choice, no sonar benefit modelled), meant to
+// expose obvious balance problems - not to replace human playtesting.
+const BOAT: Plan = [['cargo', 2], ['engine', 2], ['width', 2], ['cargo', 3], ['engine', 3], ['width', 3], ['cargo', 5], ['engine', 5], ['width', 5]]
+const STRATEGIES: Record<string, Plan> = {
+  '1 Player-focused (boat only)': BOAT,
+  '2 Cargo tenders': [['cargo', 1], ['tender', 1], ['engine', 2], ['width', 2], ['tender', 3], ['cargo', 3], ['fleet', 1], ['tender', 5], ...BOAT],
+  '3 Auto trawlers': [['cargo', 1], ['trawler', 2], ['engine', 2], ['width', 2], ['cargo', 2], ['trawler', 4], ['trawlerFleet', 1], ['engine', 3], ['width', 3], ['cargo', 3], ['trawler', 5], ...BOAT],
+  '4 Early sonar': [['sonar', 2], ['cargo', 1], ['engine', 2], ['width', 2], ['tender', 1], ['sonar', 4], ['cargo', 3], ...BOAT],
+  '5 Balanced': [['cargo', 1], ['trawler', 1], ['engine', 2], ['tender', 1], ['sonar', 1], ['width', 2], ['trawler', 3], ['tender', 3], ['cargo', 3], ['sonar', 3], ['trawlerFleet', 1], ['tender', 5], ['trawler', 5], ...BOAT],
+}
+
+describe('purchasing strategies (greedy bot)', () => {
+  const rows = Object.entries(STRATEGIES).map(([name, plan]) => {
+    const r = simulate(0.85, true, 30, undefined, true, plan)
+    const first = (id: UpgradeId) => r.buys.find((b) => b.id === id)
+    const mult = timeMultiplier(r.t)
+    return {
+      name,
+      r,
+      firstUpgrade: r.buys[0]?.t ?? NaN,
+      firstTrawler: first('trawler')?.t ?? NaN,
+      firstSonar: first('sonar')?.t ?? NaN,
+      earned: r.model.runStats.creditsEarned,
+      score: r.model.score,
+      mult,
+      final: finalScore(r.model.score, mult),
+    }
+  })
+  const fmt = (v: number) => (Number.isNaN(v) ? '  -  ' : (v / 60).toFixed(1).padStart(5))
+  // eslint-disable-next-line no-console
+  console.log(
+    [
+      'strategy                       first buy  1st trawler  1st sonar  credits  complete   arcade  mult  final   (minutes)',
+      ...rows.map(
+        (x) =>
+          `${x.name.padEnd(30)} ${fmt(x.firstUpgrade)}      ${fmt(x.firstTrawler)}        ${fmt(x.firstSonar)}      ${String(x.earned).padStart(5)}    ${fmt(x.r.t)}    ${String(x.score).padStart(6)}  x${x.mult.toFixed(2)}  ${String(x.final).padStart(6)}`,
+      ),
+    ].join('\n'),
+  )
+
+  it('every strategy finishes Coral Bay, with a first upgrade inside two minutes', () => {
+    for (const x of rows) {
+      expect(x.r.progress, x.name).toBeGreaterThanOrEqual(0.75)
+      expect(x.firstUpgrade, x.name).toBeLessThan(120)
+    }
+  }, 300_000)
+
+  it('the first trawler and the first sonar are reachable during the first half of the expedition', () => {
+    for (const x of rows.filter((q) => q.name.startsWith('3') || q.name.startsWith('5'))) {
+      const b = x.r.buys.find((q) => q.id === 'trawler')
+      expect(b, x.name).toBeDefined()
+      expect(b!.progress, x.name).toBeLessThan(0.5)
+    }
+    const sonar = rows.find((q) => q.name.startsWith('4'))!.r.buys.find((q) => q.id === 'sonar')
+    expect(sonar).toBeDefined()
+    expect(sonar!.progress).toBeLessThan(0.3)
+  })
+
+  it('no strategy is dramatically better than all the others (fleet play helps, but boat play stays viable)', () => {
+    const times = rows.map((x) => x.r.t)
+    const fastest = Math.min(...times)
+    const slowest = Math.max(...times)
+    expect(slowest / fastest).toBeLessThan(2)
+    const boat = rows[0]
+    expect(boat.r.t).toBeLessThan(60 * 12)
+  })
+
+  it('autonomous collection never earns arcade score or combos', () => {
+    const trawlerRun = rows.find((q) => q.name.startsWith('3'))!
+    const m = trawlerRun.r.model
+    // The model's score only grows on player pickups: every point is explained by the player's own collected items.
+    const player = m.runStats.collected
+    const maxPerItem = { bottle: BALANCE.debris.bottle.score * 2, container: BALANCE.debris.container.score * 2, net: BALANCE.debris.net.score * 2 }
+    const ceiling = player.bottle * maxPerItem.bottle + player.container * maxPerItem.container + player.net * maxPerItem.net
+    expect(m.score).toBeLessThanOrEqual(ceiling)
+    expect(m.runStats.trawlerCollected).toBeGreaterThan(0)
   })
 })

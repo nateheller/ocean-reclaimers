@@ -391,6 +391,57 @@ function buildTender(scene: Phaser.Scene): void {
   })
 }
 
+/** The Auto Trawler: a violet catamaran with sweeping collector booms at the bow and a sealed hopper amidships. */
+function buildTrawler(scene: Phaser.Scene): void {
+  mk(scene, 'trawler_hull', 84, 52, (g) => {
+    g.save(); g.translate(40, 26)
+    // Collector booms: two curved arms reaching forward with a net between them.
+    g.fillStyle = 'rgba(190,247,255,0.22)'
+    g.beginPath(); g.moveTo(12, -8); g.quadraticCurveTo(26, -16, 36, -19); g.lineTo(36, 19); g.quadraticCurveTo(26, 16, 12, 8); g.closePath(); g.fill()
+    g.strokeStyle = 'rgba(255,255,255,0.5)'; g.lineWidth = 0.9
+    for (const x of [20, 27, 33]) {
+      const h = 8 + (x - 12) * 0.5
+      g.beginPath(); g.moveTo(x, -h); g.lineTo(x, h); g.stroke()
+    }
+    g.lineCap = 'round'
+    for (const side of [-1, 1]) {
+      g.strokeStyle = '#2a1760'; g.lineWidth = 5.2
+      g.beginPath(); g.moveTo(10, side * 8); g.quadraticCurveTo(26, side * 15, 36, side * 19); g.stroke()
+      g.strokeStyle = '#d9c6ff'; g.lineWidth = 3.2
+      g.beginPath(); g.moveTo(10, side * 8); g.quadraticCurveTo(26, side * 15, 36, side * 19); g.stroke()
+      g.fillStyle = '#ffd23f'; g.strokeStyle = '#6a4300'; g.lineWidth = 1
+      g.beginPath(); g.arc(36, side * 19, 3, 0, Math.PI * 2); g.fill(); g.stroke()
+    }
+    // Hull
+    const hull = g.createLinearGradient(0, -10, 0, 10)
+    hull.addColorStop(0, '#b79bff'); hull.addColorStop(0.5, '#8c63e0'); hull.addColorStop(1, '#6a45c0')
+    g.fillStyle = hull; g.strokeStyle = '#3a1f7a'; g.lineWidth = 1.8
+    g.beginPath()
+    g.moveTo(-26, -9.5); g.lineTo(6, -10)
+    g.bezierCurveTo(14, -10, 19, -5, 20, 0)
+    g.bezierCurveTo(19, 5, 14, 10, 6, 10)
+    g.lineTo(-26, 9.5); g.quadraticCurveTo(-29, 0, -26, -9.5); g.closePath(); g.fill(); g.stroke()
+    g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 1.6
+    g.beginPath(); g.moveTo(-25, -7.4); g.lineTo(6, -7.8); g.bezierCurveTo(12, -7.8, 16, -4, 17, 0); g.bezierCurveTo(16, 4, 12, 7.8, 6, 7.8); g.lineTo(-25, 7.4); g.stroke()
+    // Deck + sealed hopper
+    g.fillStyle = '#efe6ff'; g.beginPath(); g.roundRect(-24, -6, 36, 12, 4); g.fill()
+    g.fillStyle = 'rgba(30,20,70,0.55)'; g.beginPath(); g.roundRect(-2, -5, 12, 10, 3); g.fill()
+    g.strokeStyle = '#3a1f7a'; g.lineWidth = 1; g.beginPath(); g.roundRect(-2.4, -5.4, 12.8, 10.8, 3); g.stroke()
+    g.fillStyle = 'rgba(124,242,255,0.55)'; g.beginPath(); g.roundRect(0, -3.2, 8, 6.4, 2); g.fill()
+    // Stern cabin
+    g.fillStyle = '#ffe08a'; g.strokeStyle = '#8a5a10'; g.lineWidth = 1.1
+    g.beginPath(); g.roundRect(-22, -5.4, 9, 10.8, 2.2); g.fill(); g.stroke()
+    g.fillStyle = '#2a1760'; g.beginPath(); g.roundRect(-16.4, -3.6, 2.2, 7.2, 1); g.fill()
+    // Beacon
+    g.fillStyle = '#ffffff'; g.beginPath(); g.arc(-18, 0, 1.9, 0, Math.PI * 2); g.fill()
+    g.fillStyle = '#c59bff'; g.beginPath(); g.arc(-18, 0, 1.1, 0, Math.PI * 2); g.fill()
+    // Twin thrusters
+    g.fillStyle = '#2b3642'
+    for (const y of [-6, 6]) { g.beginPath(); g.roundRect(-32, y - 2.5, 7, 5, 1.8); g.fill() }
+    g.restore()
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Wildlife
 // ---------------------------------------------------------------------------
@@ -553,6 +604,7 @@ export function buildAllTextures(scene: Phaser.Scene): void {
   buildDebris(scene)
   buildBoat(scene)
   buildTender(scene)
+  buildTrawler(scene)
   buildWildlife(scene)
   buildDecor(scene)
 }
