@@ -1,6 +1,6 @@
 /** Compact DOM HUD and menus layered over the game canvas. */
-import { BALANCE, type UpgradeId } from '../config/balance'
-import { UPGRADE_IDS } from '../core/stats'
+import type { UpgradeId } from '../config/balance'
+import { checkPurchase, UPGRADE_IDS, UPGRADES, type UpgradeLevels } from '../core/upgrades'
 
 export interface UIHandlers {
   onPlay(): void
@@ -15,8 +15,18 @@ export interface UIHandlers {
 
 export interface DockData {
   credits: number
-  owned: Record<UpgradeId, boolean>
+  levels: UpgradeLevels
+  /** Station visits so far (some upgrades unlock after a few trips). */
+  unloads: number
   unloaded: { credits: number; items: number; units: number } | null
+}
+
+/** One compact tender status chip in the HUD. */
+export interface TenderChip {
+  slot: number
+  label: string
+  color: string
+  load: string
 }
 
 export interface WinData {
@@ -38,9 +48,17 @@ const ICONS = {
   upCargo: '<svg viewBox="0 0 32 32"><rect x="4" y="9" width="24" height="18" rx="3" fill="#2fb6c8" stroke="#0f6b82" stroke-width="2"/><rect x="8" y="13" width="7" height="7" fill="#ffd23f"/><rect x="17" y="13" width="7" height="7" fill="#ff9b2e"/><path d="M16 2v6M12 5l4-3 4 3" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   upEngine: '<svg viewBox="0 0 32 32"><rect x="5" y="7" width="12" height="18" rx="3" fill="#e83a2a" stroke="#7a1a10" stroke-width="2"/><rect x="19" y="7" width="8" height="18" rx="3" fill="#dfe6ea" stroke="#5c6e7c" stroke-width="2"/><path d="M5 28h22" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>',
   upWidth: '<svg viewBox="0 0 32 32"><path d="M4 26C6 14 10 8 16 6M28 26C26 14 22 8 16 6" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/><circle cx="5" cy="25" r="3.4" fill="#ff5a2a"/><circle cx="27" cy="25" r="3.4" fill="#ff5a2a"/><path d="M9 21h14M11 16h10" stroke="#bff7ff" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  upTender: '<svg viewBox="0 0 32 32"><path d="M3 20l3-8h17l6 8-3 5H7z" fill="#25b383" stroke="#0c5a42" stroke-width="2" stroke-linejoin="round"/><rect x="9" y="13" width="5" height="5" rx="1" fill="#ffd23f"/><rect x="15" y="13" width="5" height="5" rx="1" fill="#ff9b2e"/><path d="M3 20h26" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M5 28c3-2 5 2 8 0s5 2 8 0 5 2 8 0" fill="none" stroke="#bff7ff" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  upFleet: '<svg viewBox="0 0 32 32"><path d="M2 17l2-6h11l4 6-2 4H4z" fill="#25b383" stroke="#0c5a42" stroke-width="1.8" stroke-linejoin="round"/><path d="M13 25l2-6h11l4 6-2 4H15z" fill="#45d6a0" stroke="#0c5a42" stroke-width="1.8" stroke-linejoin="round"/><path d="M26 4v6M23 7h6" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>',
 }
 
-const UPGRADE_ICON: Record<UpgradeId, string> = { cargo: ICONS.upCargo, engine: ICONS.upEngine, width: ICONS.upWidth }
+const UPGRADE_ICON: Record<UpgradeId, string> = {
+  cargo: ICONS.upCargo,
+  engine: ICONS.upEngine,
+  width: ICONS.upWidth,
+  tender: ICONS.upTender,
+  fleet: ICONS.upFleet,
+}
 
 function el<T extends HTMLElement>(root: ParentNode, sel: string): T {
   const found = root.querySelector<T>(sel)
@@ -75,6 +93,10 @@ export class GameUI {
   private dock: HTMLElement
   private win: HTMLElement
   private popLayer: HTMLElement
+  private chips: HTMLElement
+  private noticeBox: HTMLElement
+  private lastChips = ''
+  private noticeTimer = 0
 
   private shownCredits = 0
   private creditAnim = 0
@@ -103,6 +125,8 @@ export class GameUI {
       </div>
       <div class="combo" id="combo"><div class="combo-mult" id="c-mult">x1.2</div><div class="combo-chain" id="c-chain">3 in a row</div><div class="combo-bar"><div id="c-bar"></div></div></div>
       <div class="boost" id="boost"><i class="ico">${ICONS.boost}</i><div class="stack"><span class="lbl"><kbd>Space</kbd> Boost</span><div class="bar boostbar"><div id="b-boost"></div></div></div></div>
+      <div class="tchips" id="tchips"></div>
+      <div class="notice" id="notice"></div>
       <div class="toast" id="toast"></div>
       <div class="hint" id="hint"></div>
       <div class="prompt" id="prompt"></div>
@@ -118,7 +142,7 @@ export class GameUI {
           <div class="btns" id="title-btns"></div>
           <div class="keys">
             <div><span class="kg"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span> or <span class="kg"><kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd></span> sail</div>
-            <div><kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> station &nbsp; <kbd>Esc</kbd> pause</div>
+            <div><kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> station &nbsp; <kbd>R</kbd> tender &nbsp; <kbd>Esc</kbd> pause</div>
           </div>
           <p class="fine">A fictional, simplified game inspired by ISS Breakthrough SB012. Not a scientific model.</p>
         </div>
@@ -134,7 +158,7 @@ export class GameUI {
           </div>
           <div class="keys small">
             <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows &ndash; sail</div>
-            <div><kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> station &nbsp; <kbd>M</kbd> mute</div>
+            <div><kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> station &nbsp; <kbd>R</kbd> tender &nbsp; <kbd>M</kbd> mute</div>
           </div>
           <p class="fine">Fictional and simplified. Visual changes are stylized rewards, not scientific predictions.</p>
         </div>
@@ -166,6 +190,8 @@ export class GameUI {
     this.title = el(root, '#title')
     this.pause = el(root, '#pause')
     this.dock = el(root, '#dock')
+    this.chips = el(root, '#tchips')
+    this.noticeBox = el(root, '#notice')
     this.win = el(root, '#win')
     this.popLayer = el(root, '#pops')
 
@@ -354,6 +380,30 @@ export class GameUI {
     this.toastTimer = window.setTimeout(() => this.toastBox.classList.remove('on'), kind === 'milestone' ? 4200 : 2200)
   }
 
+  /** Compact status chips for the cargo tenders (hidden when you have none). */
+  setTenders(chips: readonly TenderChip[]): void {
+    const key = chips.map((c) => `${c.slot}|${c.label}|${c.color}|${c.load}`).join(';')
+    if (key === this.lastChips) return
+    this.lastChips = key
+    this.chips.innerHTML = chips
+      .map(
+        (c) =>
+          `<div class="tchip"><i class="ico">${ICONS.upTender}</i><span class="tn">T${c.slot + 1}</span><span class="ts" style="color:${c.color}">${c.label}</span><span class="tl">${c.load}</span></div>`,
+      )
+      .join('')
+    this.chips.classList.toggle('on', chips.length > 0)
+  }
+
+  /** A small, short-lived message that never blocks the view (e.g. "Tender delivered +18"). */
+  notice(text: string, kind: 'good' | 'warn' | '' = ''): void {
+    window.clearTimeout(this.noticeTimer)
+    this.noticeBox.className = `notice ${kind}`
+    this.noticeBox.textContent = text
+    void this.noticeBox.offsetWidth
+    this.noticeBox.classList.add('on')
+    this.noticeTimer = window.setTimeout(() => this.noticeBox.classList.remove('on'), 2200)
+  }
+
   setMuted(muted: boolean): void {
     this.muteBtn.innerHTML = muted ? ICONS.muted : ICONS.sound
     this.muteBtn.classList.toggle('off', muted)
@@ -411,16 +461,25 @@ export class GameUI {
         ? `<div class="sum good">Unloaded <b>${u.items}</b> item${u.items === 1 ? '' : 's'} <span>(${u.units} units)</span><em>+${u.credits}</em></div>`
         : '<div class="sum">Hold is empty &ndash; go find more plastic!</div>'
       : ''
+    const ctx = { levels: data.levels, unloads: data.unloads }
     const rows = UPGRADE_IDS.map((id, i) => {
-      const spec = BALANCE.upgrades[id]
-      const owned = data.owned[id]
-      const afford = data.credits >= spec.cost
-      const state = owned ? 'owned' : afford ? 'afford' : 'locked'
-      const action = owned
-        ? '<span class="tag">Installed</span>'
-        : `<button class="buy" data-buy="${id}" tabindex="-1">${spec.cost}<i class="ico sm">${ICONS.coin}</i></button>`
-      const need = !owned && !afford ? `<small>${spec.cost - data.credits} more</small>` : ''
-      return `<div class="up ${state}" data-up="${id}"><kbd>${i + 1}</kbd><i class="uico">${UPGRADE_ICON[id]}</i><div class="utext"><b>${spec.name}</b><span>${spec.blurb}</span>${need}</div>${action}</div>`
+      const def = UPGRADES[id]
+      const level = data.levels[id]
+      const check = checkPurchase(id, ctx, data.credits)
+      const state = check.ok ? 'afford' : check.reason === 'max' ? 'max' : check.reason
+      const pips = Array.from({ length: def.maxLevel }, (_, n) => `<s class="${n < level ? 'on' : ''}"></s>`).join('')
+      const now = def.effect(level)
+      const next = check.ok || check.reason !== 'max' ? def.effect(level + 1) : ''
+      const fx = next ? `<span class="fx"><em>${now}</em><i>&rarr;</i><strong>${next}</strong></span>` : `<span class="fx"><strong>${now}</strong></span>`
+      const note = !check.ok && check.reason !== 'max' ? `<small>${check.message}</small>` : ''
+      const action = check.ok
+        ? `<button class="buy" data-buy="${id}" tabindex="-1">${check.cost}<i class="ico sm">${ICONS.coin}</i></button>`
+        : check.reason === 'max'
+          ? '<span class="tag">MAX</span>'
+          : `<span class="price">${check.cost}<i class="ico sm">${ICONS.coin}</i></span>`
+      const lv = def.maxLevel > 1 ? `<span class="lv">Lv ${level}/${def.maxLevel}</span>` : level >= 1 ? '<span class="lv">Built</span>' : ''
+      const sep = id === 'tender' ? ' sep' : ''
+      return `<div class="up ${state}${sep}" data-up="${id}"><kbd>${i + 1}</kbd><i class="uico">${UPGRADE_ICON[id]}</i><div class="utext"><div class="uhead"><b>${def.name}</b>${lv}</div><div class="pips">${pips}</div>${fx}${note}</div>${action}</div>`
     }).join('')
     this.dock.innerHTML = `
       <header><b>Reclamation Station</b><span class="bal"><i class="ico sm">${ICONS.coin}</i>${data.credits}</span></header>

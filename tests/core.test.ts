@@ -16,6 +16,7 @@ import {
   writeSettings,
 } from '../src/core/save'
 import { vesselStats, noUpgrades } from '../src/core/stats'
+import { UPGRADES } from '../src/core/upgrades'
 import { buildObstacles, generateDebris, zoneAt, type DebrisSpawn } from '../src/core/worldgen'
 
 /** A tiny hand-made world so tests are exact. */
@@ -87,49 +88,112 @@ describe('credits and unloading', () => {
   })
 })
 
-describe('upgrades', () => {
-  it('has the specified costs and effects', () => {
-    expect(BALANCE.upgrades.cargo.cost).toBe(50)
-    expect(BALANCE.upgrades.engine.cost).toBe(60)
-    expect(BALANCE.upgrades.width.cost).toBe(75)
-    const base = vesselStats(noUpgrades())
-    expect(vesselStats({ ...noUpgrades(), cargo: true }).capacity).toBe(base.capacity + 10)
-    expect(vesselStats({ ...noUpgrades(), engine: true }).maxSpeed).toBeCloseTo(base.maxSpeed * 1.15)
-    expect(vesselStats({ ...noUpgrades(), width: true }).zoneHalfWidth).toBeCloseTo(base.zoneHalfWidth * 1.25)
+describe('multi-level upgrades', () => {
+  const at = (id: keyof typeof UPGRADES, l: number) => UPGRADES[id].cost(l)
+
+  it('has five levels per boat category', () => {
+    for (const id of ['cargo', 'engine', 'width'] as const) expect(UPGRADES[id].maxLevel).toBe(5)
   })
 
-  it('requires enough credits, deducts the cost and can only be bought once', () => {
+  it('prices every level from the configurable design table and price scale', () => {
+    const table = {
+      cargo: [35, 60, 95, 145, 220],
+      engine: [40, 70, 110, 170, 260],
+      width: [45, 80, 125, 190, 290],
+    } as const
+    const scale = BALANCE.upgrades.priceScale
+    for (const id of ['cargo', 'engine', 'width'] as const) {
+      expect(BALANCE.upgrades[id].baseCosts).toEqual(table[id])
+      table[id].forEach((base, i) => expect(at(id, i + 1)).toBe(Math.max(1, Math.round(base * scale))))
+    }
+  })
+
+  it('never makes a boat level cheaper than the one before it', () => {
+    for (const id of ['cargo', 'engine', 'width'] as const) {
+      for (let l = 2; l <= UPGRADES[id].maxLevel; l++) expect(at(id, l)).toBeGreaterThanOrEqual(at(id, l - 1))
+    }
+  })
+
+  it('cargo hold: +5 units per level, 20 -> 45', () => {
+    const caps = [0, 1, 2, 3, 4, 5].map((l) => vesselStats({ ...noUpgrades(), cargo: l }).capacity)
+    expect(caps).toEqual([20, 25, 30, 35, 40, 45])
+  })
+
+  it('engine: +5% speed and acceleration per level relative to the original, up to +25%', () => {
+    const base = vesselStats(noUpgrades())
+    for (let l = 1; l <= 5; l++) {
+      const st = vesselStats({ ...noUpgrades(), engine: l })
+      expect(st.maxSpeed).toBeCloseTo(base.maxSpeed * (1 + 0.05 * l))
+      expect(st.accel).toBeCloseTo(base.accel * (1 + 0.05 * l))
+    }
+    expect(vesselStats({ ...noUpgrades(), engine: 5 }).maxSpeed).toBeCloseTo(base.maxSpeed * 1.25)
+  })
+
+  it('collection width: +8% per level relative to the original, up to +40%', () => {
+    const base = vesselStats(noUpgrades())
+    for (let l = 1; l <= 5; l++) {
+      expect(vesselStats({ ...noUpgrades(), width: l }).zoneHalfWidth).toBeCloseTo(base.zoneHalfWidth * (1 + 0.08 * l))
+    }
+    expect(vesselStats({ ...noUpgrades(), width: 5 }).zoneHalfWidth).toBeCloseTo(base.zoneHalfWidth * 1.4)
+  })
+
+  it('buys levels in order, deducts the exact cost and applies the effect', () => {
     const m = modelWith([])
-    m.credits = 49
-    expect(m.buy('cargo')).toEqual({ ok: false, reason: 'poor' })
-    expect(m.credits).toBe(49)
-    m.credits = 60
-    expect(m.buy('cargo')).toMatchObject({ ok: true, cost: 50 })
-    expect(m.credits).toBe(10)
-    expect(m.capacity).toBe(30)
-    m.credits = 500
-    expect(m.buy('cargo')).toEqual({ ok: false, reason: 'owned' })
-    expect(m.credits).toBe(500)
-    expect(m.buy('engine').ok).toBe(true)
-    expect(m.buy('width').ok).toBe(true)
-    expect(m.credits).toBe(500 - 60 - 75)
-    expect(m.allUpgradesOwned()).toBe(true)
+    m.credits = 1000
+    for (let l = 1; l <= 5; l++) {
+      const before = m.credits
+      const r = m.buy('cargo')
+      expect(r).toMatchObject({ ok: true, level: l, cost: at('cargo', l) })
+      expect(m.credits).toBe(before - at('cargo', l))
+      expect(m.capacity).toBe(20 + 5 * l)
+    }
+  })
+
+  it('refuses purchases without enough credits and changes nothing', () => {
+    const m = modelWith([])
+    m.credits = at('engine', 1) - 1
+    const r = m.buy('engine')
+    expect(r).toMatchObject({ ok: false, reason: 'poor' })
+    expect(m.credits).toBe(at('engine', 1) - 1)
+    expect(m.upgrades.engine).toBe(0)
+  })
+
+  it('stops at the maximum level', () => {
+    const m = modelWith([])
+    m.credits = 10_000
+    for (let i = 0; i < 5; i++) expect(m.buy('width').ok).toBe(true)
+    const before = m.credits
+    expect(m.buy('width')).toMatchObject({ ok: false, reason: 'max' })
+    expect(m.credits).toBe(before)
+    expect(m.upgrades.width).toBe(5)
   })
 
   it('makes the boat faster and the zone wider in play', () => {
-    const run = (engine: boolean) => {
+    const run = (engine: number) => {
       const stats = vesselStats({ ...noUpgrades(), engine })
       const b = createBoat(1000, 1000, 0)
       for (let i = 0; i < 240; i++) stepBoat(b, { throttle: 1, steer: 0, boost: false }, stats, 1 / 60)
       return b.x
     }
-    expect(run(true)).toBeGreaterThan(run(false) * 1.0 + 0) // further travelled in the same time
+    expect(run(5)).toBeGreaterThan(run(0))
+    expect(run(3)).toBeGreaterThan(run(1))
     const narrow = vesselStats(noUpgrades())
-    const wide = vesselStats({ ...noUpgrades(), width: true })
+    const wide = vesselStats({ ...noUpgrades(), width: 5 })
     const boat = { x: 0, y: 0, heading: 0 }
     const sideY = narrow.zoneHalfWidth + 6
     expect(inCollectionZone(boat, 50, sideY, 10, narrow)).toBe(false)
     expect(inCollectionZone(boat, 50, sideY, 10, wide)).toBe(true)
+  })
+
+  it('reports locked and maxed states for the interface', () => {
+    const m = modelWith([])
+    m.credits = 1000
+    expect(m.canBuy('tender')).toMatchObject({ ok: false, reason: 'locked' })
+    expect(m.canBuy('fleet')).toMatchObject({ ok: false, reason: 'locked' })
+    expect(UPGRADES.cargo.effect(0)).toBe('20 cargo units')
+    expect(UPGRADES.cargo.effect(1)).toBe('25 cargo units')
+    expect(UPGRADES.engine.effect(2)).toBe('+10% speed')
+    expect(UPGRADES.width.effect(5)).toBe('+40% width')
   })
 })
 

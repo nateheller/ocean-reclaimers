@@ -2,8 +2,7 @@
 import Phaser from 'phaser'
 import { BALANCE } from '../config/balance'
 import type { CargoCounts } from '../core/cargo'
-import type { UpgradeFlags } from '../core/stats'
-import { vesselStats } from '../core/stats'
+import { noUpgrades, vesselStats, type UpgradeLevels } from '../core/stats'
 import { TS } from './textures'
 
 const TYPE_COLORS = { bottle: 0x6cc7ff, container: 0xff9b2e, net: 0x8fe05a }
@@ -16,7 +15,7 @@ export class BoatView {
   private readonly hold: Phaser.GameObjects.Graphics
   private readonly engines: Phaser.GameObjects.Graphics
   private readonly flame: Phaser.GameObjects.Image
-  private upgrades: UpgradeFlags = { cargo: false, engine: false, width: false }
+  private upgrades: UpgradeLevels = noUpgrades()
   private full = false
   private cargo: CargoCounts = { bottle: 0, container: 0, net: 0 }
   private capacity: number = BALANCE.cargo.startCapacity
@@ -32,12 +31,12 @@ export class BoatView {
     this.redrawAll()
   }
 
-  setUpgrades(up: UpgradeFlags, animate = false): void {
+  setUpgrades(up: UpgradeLevels, animate = false): void {
     const before = this.upgrades
     this.upgrades = { ...up }
     this.redrawAll()
     if (animate) {
-      const popped = (['cargo', 'engine', 'width'] as const).find((k) => up[k] && !before[k])
+      const popped = (['cargo', 'engine', 'width'] as const).find((k) => up[k] > before[k])
       const target = popped === 'width' ? this.arms : popped === 'engine' ? this.engines : this.hold
       target.setScale(0.6)
       this.scene.tweens.add({ targets: target, scaleX: 1, scaleY: 1, duration: 520, ease: 'Back.easeOut' })
@@ -110,26 +109,45 @@ export class BoatView {
     for (const side of [-1, 1]) {
       g.lineStyle(7, 0x0a3a58, 0.35)
       this.strokeArm(g, side, hw, len)
-      g.lineStyle(4.5, col, 1)
+      g.lineStyle(4.5 + this.upgrades.width * 0.35, col, 1)
       this.strokeArm(g, side, hw, len)
-      // floats
-      const floats = this.upgrades.width ? 7 : 5
+      // floats: one more per arm level; tips change colour as the arms are upgraded
+      const w = this.upgrades.width
+      const floats = 5 + w
+      const tipColor = [0xff5a2a, 0xff5a2a, 0xffb02a, 0xffd23f, 0x3ee6c1, 0xbff7ff][w]
       for (let i = 1; i <= floats; i++) {
         const p = this.armPoint(side, i / floats, hw, len)
         const tip = i === floats
-        g.fillStyle(tip ? 0xff5a2a : 0xff9b2e, 1)
-        g.fillCircle(p.x, p.y, tip ? 5.2 : 3.2)
+        g.fillStyle(tip ? tipColor : i % 2 ? 0xff9b2e : 0xffc46a, 1)
+        g.fillCircle(p.x, p.y, tip ? 5.2 + w * 0.25 : 3.2)
         g.fillStyle(0xffffff, 0.8)
         g.fillCircle(p.x - 1, p.y - 1, tip ? 1.8 : 1.1)
       }
     }
-    if (this.upgrades.width) {
-      // Extra wing rails on the wide arms.
-      g.lineStyle(2.2, 0xffd23f, 0.95)
+    const w = this.upgrades.width
+    if (w >= 1) {
+      // Wing rails on the upgraded arms: one rail from level 1, a second from level 3.
+      g.lineStyle(2.2, w >= 5 ? 0xbff7ff : 0xffd23f, 0.95)
       for (const side of [-1, 1]) {
         const a = this.armPoint(side, 0.5, hw, len); const b = this.armPoint(side, 1, hw, len)
-        g.lineBetween(a.x, a.y, b.x, b.y + side * 0)
-        g.lineBetween(a.x, a.y + side * -4, b.x, b.y + side * -4)
+        g.lineBetween(a.x, a.y, b.x, b.y)
+        if (w >= 3) {
+          const a2 = this.armPoint(side, 0.3, hw, len); const b2 = this.armPoint(side, 0.8, hw, len)
+          g.lineBetween(a2.x, a2.y - side * 4, b2.x, b2.y - side * 4)
+        }
+      }
+    }
+    if (w >= 4) {
+      // Extra net mesh and a glowing leading edge
+      g.lineStyle(1.4, 0xbff7ff, 0.5)
+      for (const t of [0.5, 0.8]) {
+        const a = this.armPoint(-1, t, hw, len); const b = this.armPoint(1, t, hw, len)
+        g.lineBetween(a.x, a.y, b.x, b.y)
+      }
+      if (w >= 5) {
+        g.lineStyle(3, 0x3ee6c1, 0.55)
+        const a = this.armPoint(-1, 1, hw, len); const b = this.armPoint(1, 1, hw, len)
+        g.lineBetween(a.x, a.y, b.x, b.y)
       }
     }
   }
@@ -146,30 +164,46 @@ export class BoatView {
   private drawEngines(): void {
     const g = this.engines
     g.clear()
-    const drawMotor = (y: number, big: boolean) => {
-      const w = big ? 10 : 8
+    const e = this.upgrades.engine
+    const motor = (y: number, big: boolean, cover: number) => {
+      const w = big ? 10 + (e >= 4 ? 1.5 : 0) : 8
       const h = big ? 11 : 9
       g.fillStyle(0x000000, 0.2); g.fillRoundedRect(-41, y - h / 2 + 2, w + 2, h, 3)
       g.fillStyle(0x2b3642, 1); g.fillRoundedRect(-41, y - h / 2, w, h, 3)
-      g.fillStyle(big ? 0xe83a2a : 0xdfe6ea, 1); g.fillRoundedRect(-40, y - h / 2 + 1.5, w - 3, h - 3, 2)
+      g.fillStyle(cover, 1); g.fillRoundedRect(-40, y - h / 2 + 1.5, w - 3, h - 3, 2)
       if (big) { g.fillStyle(0xffd23f, 1); g.fillRect(-39, y - 0.8, w - 5, 1.6) }
       g.fillStyle(0x9aa7b2, 1); g.fillCircle(-42, y, 1.8)
     }
-    if (this.upgrades.engine) {
-      drawMotor(-6.5, true)
-      drawMotor(6.5, true)
+    if (e === 0) motor(0, false, 0xdfe6ea)
+    else if (e === 1) motor(0, true, 0xe83a2a)
+    else if (e === 2) {
+      motor(0, true, 0xe83a2a)
+      // exhaust vents
+      g.fillStyle(0x2b3642, 1); g.fillRect(-45, -4, 3, 2); g.fillRect(-45, 2, 3, 2)
     } else {
-      drawMotor(0, false)
+      motor(-6.5, true, 0xe83a2a)
+      motor(6.5, true, 0xe83a2a)
+      if (e >= 4) {
+        // turbo fins
+        g.fillStyle(0xffd23f, 1)
+        g.fillTriangle(-44, -12.5, -38, -12.5, -41, -16)
+        g.fillTriangle(-44, 12.5, -38, 12.5, -41, 16)
+      }
+      if (e >= 5) {
+        g.lineStyle(1.8, 0x3ee6c1, 0.9)
+        g.strokeCircle(-46, -6.5, 2.6); g.strokeCircle(-46, 6.5, 2.6)
+      }
     }
   }
 
   private drawHold(): void {
     const g = this.hold
     g.clear()
-    const big = this.upgrades.cargo
-    const cols = 3
-    const rows = big ? 3 : 2
-    const size = big ? 5.4 : 6.2
+    const lvl = this.upgrades.cargo
+    const big = lvl >= 1
+    const cols = lvl >= 4 ? 4 : 3
+    const rows = lvl >= 2 ? 3 : 2
+    const size = lvl >= 4 ? 4.8 : lvl >= 2 ? 5.4 : 6.2
     const gap = 1.3
     const total = cols * rows
     const used = this.cargo.bottle + this.cargo.container * 2 + this.cargo.net * 4
@@ -199,7 +233,7 @@ export class BoatView {
     }
     if (big) {
       // cargo upgrade: reinforced side rails
-      g.lineStyle(1.6, 0x2fb6c8, 1)
+      g.lineStyle(1.6, lvl >= 5 ? 0xffd23f : lvl >= 3 ? 0x3ee6c1 : 0x2fb6c8, 1)
       g.strokeRoundedRect(startX - 2.4, startY - 2.4, cols * (size + gap) + 1.2, rows * (size + gap) + 1.2, 2)
     }
   }

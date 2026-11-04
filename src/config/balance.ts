@@ -7,7 +7,7 @@
  */
 
 export type DebrisType = 'bottle' | 'container' | 'net'
-export type UpgradeId = 'cargo' | 'engine' | 'width'
+export type UpgradeId = 'cargo' | 'engine' | 'width' | 'tender' | 'fleet'
 
 export interface DebrisSpec {
   /** Cargo units occupied in the hold. */
@@ -24,10 +24,8 @@ export interface DebrisSpec {
 export interface UpgradeSpec {
   readonly id: UpgradeId
   readonly name: string
-  readonly blurb: string
-  readonly cost: number
-  /** Additive bonus (cargo units) or multiplier (engine, width), see `stats.ts`. */
-  readonly value: number
+  /** Base (design-table) price of each level, level 1 first. Scaled by `upgrades.priceScale`. */
+  readonly baseCosts: readonly number[]
 }
 
 export interface ComboTier {
@@ -81,31 +79,69 @@ export const BALANCE = {
     net: { cargo: 4, credits: 10, score: 60, radius: 24, label: 'Fishing net' },
   } as Record<DebrisType, DebrisSpec>,
 
-  /** Each upgrade can be bought once in v0.1. */
+  /**
+   * Multi-level upgrades (v0.2). Each track has up to five levels bought in order.
+   * Prices are `baseCosts[level-1] * priceScale`, rounded. The base table is the original design table; the scale
+   * brings it in line with the credits that Coral Bay actually contains (see README, "Economy").
+   */
   upgrades: {
-    cargo: {
-      id: 'cargo',
-      name: 'Cargo Hold',
-      blurb: '+10 cargo capacity',
-      cost: 50,
-      value: 10,
+    priceScale: 0.2,
+    /** Cargo Hold: +5 units per level, 20 -> 45. */
+    cargo: { id: 'cargo', name: 'Cargo Hold', perLevel: 5, baseCosts: [35, 60, 95, 145, 220] },
+    /** Engine: +5% base speed and acceleration per level (relative to the original), up to +25%. */
+    engine: { id: 'engine', name: 'Engine', perLevel: 0.05, baseCosts: [40, 70, 110, 170, 260] },
+    /** Collection arms: +8% width per level (relative to the original), up to +40%. */
+    width: { id: 'width', name: 'Collection Arms', perLevel: 0.08, baseCosts: [45, 80, 125, 190, 290] },
+    /**
+     * Cargo Tender track. L1 unlocks the first tender; L2 and L4 add capacity; L3 adds travel speed;
+     * L5 unlocks automatic dispatch. Arrays are indexed by level (index 0 = no tender yet).
+     */
+    tender: {
+      id: 'tender',
+      name: 'Cargo Tender',
+      baseCosts: [250, 150, 225, 325, 400],
+      capacity: [0, 10, 15, 15, 25, 25],
+      speedMult: [1, 1, 1, 1.35, 1.35, 1.35],
+      /** The tender is offered after this many successful station visits so players feel the chore first. */
+      minUnloadsToBuy: 3,
+      autoDispatchLevel: 5,
     },
-    engine: {
-      id: 'engine',
-      name: 'Twin Engines',
-      blurb: '+15% speed & acceleration',
-      cost: 60,
-      value: 1.15,
-    },
-    width: {
-      id: 'width',
-      name: 'Wide Net Arms',
-      blurb: '+25% collection width',
-      cost: 75,
-      value: 1.25,
-    },
-  } as Record<UpgradeId, UpgradeSpec>,
-
+    /** Second Cargo Tender (a future version may allow a third). */
+    fleet: { id: 'fleet', name: 'Second Tender', baseCosts: [300], requiresTenderLevel: 2 },
+  },
+  /** Cargo tender behaviour. Distances in px, times in seconds, speeds in px/s. */
+  tender: {
+    maxTenders: 2,
+    baseSpeed: 265,
+    accel: 520,
+    turnRate: 3.4,
+    radius: 14,
+    /** Idle tenders hover this close to the player. */
+    followRadius: 150,
+    /** A requested tender loads once it is this close. */
+    transferRange: 95,
+    loadSeconds: 0.9,
+    unloadSeconds: 1.1,
+    /** Cargo is delivered when the tender is this close to the station dock point. */
+    deliveryRadius: 150,
+    /** Auto dispatch (tender L5) fires when the hold is at least this full. */
+    autoDispatchFill: 0.7,
+    autoDispatchCooldown: 5,
+    /** A tender that makes less than `stuckMinMove` px of progress in `stuckCheckSeconds` re-plans, then recovers. */
+    stuckCheckSeconds: 1.4,
+    stuckMinMove: 12,
+    /** Hard cap on any single leg; after this the tender is moved to safe water and carries on. */
+    phaseTimeout: 75,
+    replanSeconds: 0.8,
+    /** Seconds between "no tender" style notices so messages never spam. */
+    noticeCooldown: 2.5,
+  },
+  /** Navigation grid shared by all autonomous vessels. */
+  nav: {
+    cell: 40,
+    /** Extra clearance around solid obstacles, on top of the vessel radius. */
+    margin: 22,
+  },
   /** Arcade combo: affects score only, never cargo or credits. */
   combo: {
     /** Seconds without a pickup before the chain resets. */
@@ -144,7 +180,7 @@ export const BALANCE = {
   },
 
   save: {
-    key: 'oceanreclaimers.save.v1',
+    key: 'oceanreclaimers.save.v1', // v0.1 key kept so existing saves migrate
     settingsKey: 'oceanreclaimers.settings.v1',
     autosaveSeconds: 6,
   },

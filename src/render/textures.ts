@@ -342,6 +342,55 @@ function buildBoat(scene: Phaser.Scene): void {
   })
 }
 
+
+function tenderPath(g: Ctx, inset = 0): void {
+  const i = inset
+  g.beginPath()
+  g.moveTo(-22 + i, -10 + i)
+  g.lineTo(10, -10.5 + i)
+  g.bezierCurveTo(19, -10.5 + i, 25, -5, 27 - i, 0)
+  g.bezierCurveTo(25, 5, 19, 10.5 - i, 10, 10.5 - i)
+  g.lineTo(-22 + i, 10 - i)
+  g.quadraticCurveTo(-25 + i, 0, -22 + i, -10 + i)
+  g.closePath()
+}
+
+/** The Cargo Tender: a small, sturdy teal barge with an open cargo well (crates are drawn on top at runtime). */
+function buildTender(scene: Phaser.Scene): void {
+  mk(scene, 'tender_hull', 64, 38, (g) => {
+    g.save(); g.translate(32, 19)
+    const hull = g.createLinearGradient(0, -10, 0, 10)
+    hull.addColorStop(0, '#45d6a0'); hull.addColorStop(0.5, '#25b383'); hull.addColorStop(1, '#168a66')
+    g.fillStyle = hull; g.strokeStyle = '#0c5a42'; g.lineWidth = 1.8
+    tenderPath(g); g.fill(); g.stroke()
+    g.strokeStyle = '#ffffff'; g.lineWidth = 2
+    tenderPath(g, 2.2); g.stroke()
+    // Deck
+    g.fillStyle = '#f2e6c6'
+    tenderPath(g, 4.2); g.fill()
+    // Cargo well
+    g.fillStyle = 'rgba(40,60,70,0.28)'
+    g.beginPath(); g.roundRect(-12, -6.4, 22, 12.8, 2.5); g.fill()
+    g.strokeStyle = '#0c5a42'; g.lineWidth = 1.2
+    g.beginPath(); g.roundRect(-12.5, -6.9, 23, 13.8, 2.5); g.stroke()
+    // Stern cabin
+    g.fillStyle = 'rgba(0,30,60,0.25)'; g.beginPath(); g.roundRect(-20, -6, 8, 13, 2.5); g.fill()
+    const cab = g.createLinearGradient(0, -6, 0, 7)
+    cab.addColorStop(0, '#ffe08a'); cab.addColorStop(1, '#f2a93a')
+    g.fillStyle = cab; g.strokeStyle = '#8a5a10'; g.lineWidth = 1.2
+    g.beginPath(); g.roundRect(-21, -6.6, 8, 13, 2.2); g.fill(); g.stroke()
+    g.fillStyle = '#12445f'; g.beginPath(); g.roundRect(-15.6, -4.2, 2.2, 8.4, 1); g.fill()
+    // Bow marker and light
+    g.fillStyle = '#ffd23f'
+    g.beginPath(); g.moveTo(14, -5); g.lineTo(19.5, -2.4); g.lineTo(19.5, 2.4); g.lineTo(14, 5); g.closePath(); g.fill()
+    g.fillStyle = '#fff6a8'; g.beginPath(); g.arc(25, 0, 1.4, 0, Math.PI * 2); g.fill()
+    // Roof beacon
+    g.fillStyle = '#ffffff'; g.beginPath(); g.arc(-17, 0, 1.8, 0, Math.PI * 2); g.fill()
+    g.fillStyle = '#2fe0a0'; g.beginPath(); g.arc(-17, 0, 1, 0, Math.PI * 2); g.fill()
+    g.restore()
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Wildlife
 // ---------------------------------------------------------------------------
@@ -503,6 +552,7 @@ export function buildAllTextures(scene: Phaser.Scene): void {
   buildSprites(scene)
   buildDebris(scene)
   buildBoat(scene)
+  buildTender(scene)
   buildWildlife(scene)
   buildDecor(scene)
 }

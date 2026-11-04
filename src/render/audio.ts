@@ -1,7 +1,7 @@
 /** Fully synthesized audio (Web Audio): ambience, engine hum and sound effects. No audio files. */
 import { BALANCE } from '../config/balance'
 
-type SfxName = 'collect' | 'net' | 'splash' | 'bump' | 'full' | 'unload' | 'coin' | 'upgrade' | 'milestone' | 'click' | 'boost' | 'dock' | 'denied' | 'combo'
+type SfxName = 'collect' | 'net' | 'splash' | 'bump' | 'full' | 'unload' | 'coin' | 'upgrade' | 'milestone' | 'click' | 'boost' | 'dock' | 'denied' | 'combo' | 'request' | 'transfer' | 'deliver' | 'notice'
 
 // A major pentatonic ladder so chained pickups sound like a rising melody.
 const LADDER = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24]
@@ -221,9 +221,35 @@ export class AudioEngine {
         this.tone(f * 1.5, 0.22, 'sine', 0.1, 0.05)
         break
       }
-      case 'upgrade':
-        ;[0, 4, 7, 12, 16].forEach((s, i) => this.tone(330 * Math.pow(2, s / 12), 0.45, 'triangle', 0.22, i * 0.075))
-        this.tone(660, 0.8, 'sine', 0.1, 0.35)
+      case 'upgrade': {
+        // arg = the level just reached (1..5): each level rings a little higher, and the last one gets a flourish.
+        const lift = Math.pow(2, (Math.max(1, arg) - 1) * 1.5 / 12)
+        ;[0, 4, 7, 12, 16].forEach((s, i) => this.tone(330 * lift * Math.pow(2, s / 12), 0.45, 'triangle', 0.22, i * 0.075))
+        this.tone(660 * lift, 0.8, 'sine', 0.1, 0.35)
+        if (arg >= 5) {
+          ;[19, 24, 28].forEach((s, i) => this.tone(330 * Math.pow(2, s / 12), 0.7, 'triangle', 0.18, 0.4 + i * 0.1))
+        }
+        break
+      }
+      case 'request':
+        // Friendly two-note call to the tender.
+        this.tone(523, 0.12, 'triangle', 0.2)
+        this.tone(784, 0.2, 'triangle', 0.2, 0.1)
+        break
+      case 'transfer':
+        // Crates thunk across: short low knock plus a soft whoosh.
+        this.tone(160, 0.1, 'sine', 0.35, 0, 90)
+        this.tone(190, 0.1, 'sine', 0.3, 0.09, 100)
+        this.noise(0.18, 1400, 0.7, 0.12, 'bandpass', 0.02, 500)
+        break
+      case 'deliver':
+        // Quieter than a player unload: the tender is the supporting act.
+        this.noise(0.35, 700, 0.5, 0.16, 'lowpass', 0, 220)
+        this.tone(392, 0.16, 'triangle', 0.14)
+        this.tone(587, 0.26, 'triangle', 0.14, 0.1)
+        break
+      case 'notice':
+        this.tone(300, 0.09, 'triangle', 0.1)
         break
       case 'milestone':
         ;[0, 4, 7, 11, 12, 16, 19, 24].forEach((s, i) => this.tone(262 * Math.pow(2, s / 12), 0.6, 'triangle', 0.2, i * 0.09))

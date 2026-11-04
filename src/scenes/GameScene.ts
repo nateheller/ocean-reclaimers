@@ -25,11 +25,13 @@ import {
 import { GameModel } from '../core/model'
 import { Rng, hashSeed } from '../core/rng'
 import { buildSave, clearSave, loadSave, loadSettings, writeSave, writeSettings } from '../core/save'
-import { UPGRADE_IDS, noUpgrades } from '../core/stats'
+import { TENDER_STATUS_LABEL, type TenderEvent } from '../core/tender'
+import { UPGRADES, noUpgrades } from '../core/upgrades'
 import { buildObstacles, generateDebris, islandPalms, zoneAt, type DebrisSpawn } from '../core/worldgen'
 import { AudioEngine } from '../render/audio'
 import { BoatView } from '../render/boatView'
 import { Input } from '../render/input'
+import { TENDER_STATUS_COLOR, TenderView } from '../render/tenderView'
 import { TS, buildAllTextures } from '../render/textures'
 import { Wildlife } from '../render/wildlife'
 import { STATION_ART, bakeLandmass, bakeReef, bakeRock, bakeStation, buildDepthLayer } from '../render/worldart'
@@ -111,6 +113,8 @@ export class GameScene extends Phaser.Scene {
   private fullMsgCooldown = 0
   private lastCargoKey = ''
   private upgradeHinted = false
+  private tenderView!: TenderView
+  private tenderCalls = 0
   private lastDockUnload: { credits: number; items: number; units: number } | null = null
   private winShown = false
   private fontReady = false
@@ -139,6 +143,8 @@ export class GameScene extends Phaser.Scene {
     this.buildEffects()
 
     this.boatView = new BoatView(this, D.boat)
+    this.tenderView = new TenderView(this, D.boat - 0.3, D.text)
+    this.tenderView.onWake = (x, y) => this.wake.emitParticleAt(x, y)
     this.wildlife = new Wildlife(this, D.wild, D.dolphinJump)
     this.wildlife.onSplash = (x, y, big) => this.splashAt(x, y, big ? 14 : 6, true)
 
@@ -419,6 +425,7 @@ export class GameScene extends Phaser.Scene {
     this.applyClarity()
     this.wildlife.ensureTier(level, true)
     this.winShown = this.model.completed
+    this.syncTenders(false)
   }
 
   private startGame(continueSave: boolean): void {
@@ -471,6 +478,9 @@ export class GameScene extends Phaser.Scene {
     this.movedOnce = false
     this.upgradeHinted = false
     this.lastCargoKey = ''
+    this.tenderCalls = 0
+    this.tenderView.clear()
+    this.ui.setTenders([])
     if (announce) this.ui.toast('Fresh start', 'Coral Bay is waiting')
   }
 
@@ -518,7 +528,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private dockData() {
-    return { credits: this.model.credits, owned: { ...this.model.upgrades }, unloaded: this.lastDockUnload }
+    return { credits: this.model.credits, levels: { ...this.model.upgrades }, unloads: this.model.unloads, unloaded: this.lastDockUnload }
   }
 
   private buyUpgrade(id: UpgradeId): void {
@@ -529,7 +539,7 @@ export class GameScene extends Phaser.Scene {
       this.ui.shakeUpgrade(id)
       return
     }
-    this.audio.play('upgrade')
+    this.audio.play('upgrade', result.level)
     this.boatView.setUpgrades(this.model.upgrades, true)
     this.boatView.setCargo(this.model.cargo, this.model.capacity)
     this.ui.setCredits(this.model.credits)
@@ -540,9 +550,147 @@ export class GameScene extends Phaser.Scene {
     this.sparkle.explode(26, this.boat.x, this.boat.y)
     const ring = this.sprite(this.boat.x, this.boat.y, 'ring', D.fx, 0.4).setAlpha(0.9).setTint(0xffe14a)
     this.tweens.add({ targets: ring, scale: 1.6 / TS * 2, alpha: 0, duration: 700, onComplete: () => ring.destroy() })
-    this.floatText(this.boat.x, this.boat.y - 40, BALANCE.upgrades[id].blurb, '#ffe14a', 22)
+    const def = UPGRADES[id]
+    const maxed = result.level >= def.maxLevel
+    this.floatText(this.boat.x, this.boat.y - 40, `${def.name}${def.maxLevel > 1 ? ` ${result.level}` : ''}`, '#ffe14a', 22)
+    this.floatText(this.boat.x, this.boat.y - 12, maxed && def.maxLevel > 1 ? 'MAX!' : def.effect(result.level), '#ffffff', 17)
+    if (maxed && def.maxLevel > 1) this.ui.pop(`${def.name.toUpperCase()} MAXED`, 'pink')
+    this.syncTenders(true)
     this.cameras.main.flash(180, 255, 245, 200, true)
     this.saveNow()
+  }
+
+  // ===========================================================================
+  // Cargo tenders
+  // ===========================================================================
+  /** Make the tender views match the fleet. `announce` plays a launch effect for brand-new tenders. */
+  private syncTenders(announce: boolean): void {
+    const created = this.tenderView.sync(this.model.fleet.tenders)
+    this.tenderView.update(this.model.fleet.tenders, this.time.now, 0)
+    this.updateTenderChips()
+    if (!announce) return
+    for (const id of created) {
+      const pos = this.tenderView.getPosition(id)
+      if (!pos) continue
+      this.splashAt(pos.x, pos.y, 14, true)
+      this.sparkle.explode(18, pos.x, pos.y)
+      this.floatText(pos.x, pos.y - 30, 'Tender launched!', '#6cf0c1', 20)
+    }
+  }
+
+  private runFleet(dt: number): void {
+    if (this.model.fleet.count === 0) return
+    const events = this.model.updateFleet(dt, this.boat)
+    if (events.length) this.handleTenderEvents(events)
+    this.tenderView.update(this.model.fleet.tenders, this.time.now, dt)
+    this.updateTenderChips()
+  }
+
+  private updateTenderChips(): void {
+    const cap = this.model.tenderStats.capacity
+    this.ui.setTenders(
+      this.model.fleet.tenders.map((t, slot) => {
+        const units = t.cargo.bottle + t.cargo.container * 2 + t.cargo.net * 4
+        return {
+          slot,
+          label: TENDER_STATUS_LABEL[t.status],
+          color: TENDER_STATUS_COLOR[t.status],
+          load: units > 0 ? `${units}/${cap}` : '',
+        }
+      }),
+    )
+  }
+
+  private callTender(): void {
+    const { result, events } = this.model.requestTender(this.boat)
+    if (!result.ok) {
+      this.audio.play('denied')
+      const text =
+        result.reason === 'none'
+          ? 'Buy a Cargo Tender at the station first'
+          : result.reason === 'empty'
+            ? 'Your hold is empty - collect some plastic first'
+            : result.reason === 'claimed'
+              ? 'A tender is already on its way for this cargo'
+              : 'All tenders are busy'
+      this.ui.notice(text, 'warn')
+      return
+    }
+    this.tenderCalls += 1
+    this.audio.play('request')
+    const slot = this.model.fleet.tenders.indexOf(result.tender) + 1
+    this.ui.notice(`Tender T${slot} on its way`, 'good')
+    const ring = this.sprite(this.boat.x, this.boat.y, 'ring', D.fx, 0.3).setAlpha(0.9).setTint(0x6cf0c1)
+    this.tweens.add({ targets: ring, scale: 1.5 / TS * 2, alpha: 0, duration: 650, onComplete: () => ring.destroy() })
+    this.handleTenderEvents(events)
+  }
+
+  private handleTenderEvents(events: readonly TenderEvent[]): void {
+    for (const e of events) {
+      switch (e.type) {
+        case 'dispatched':
+          if (e.auto) {
+            this.audio.play('request')
+            this.ui.notice('Tender dispatched automatically', 'good')
+          }
+          break
+        case 'loaded': {
+          this.audio.play('transfer')
+          this.flyCrates(e.tender.x, e.tender.y, e.counts)
+          this.floatText(e.tender.x, e.tender.y - 46, `Loaded ${e.units}`, '#ffe14a', 18)
+          this.boatView.setCargo(this.model.cargo, this.model.capacity)
+          this.refreshCargo(true)
+          this.saveTimer = Math.min(this.saveTimer, BALANCE.save.autosaveSeconds - 1.5)
+          break
+        }
+        case 'nothingToCarry':
+          this.ui.notice('Tender returned - your hold was already empty', 'warn')
+          break
+        case 'delivered': {
+          this.audio.play('deliver')
+          this.audio.play('coin', 2)
+          this.floatText(330, 3020, `+${e.credits}`, '#ffe14a', 26)
+          this.pulseStation()
+          this.ui.setCredits(this.model.credits)
+          this.ui.notice(`Tender delivered ${e.units} units  +${e.credits}`, 'good')
+          if (this.ui.dockOpen) this.ui.renderDock(this.dockData())
+          this.saveNow()
+          break
+        }
+        default:
+          break
+      }
+    }
+  }
+
+  /** A short hop of small crates from the player's boat to the tender. */
+  private flyCrates(tx: number, ty: number, counts: { bottle: number; container: number; net: number }): void {
+    const colors: number[] = []
+    for (let i = 0; i < counts.net; i++) colors.push(0x8fe05a)
+    for (let i = 0; i < counts.container; i++) colors.push(0xff9b2e)
+    for (let i = 0; i < counts.bottle; i++) colors.push(0x6cc7ff)
+    const n = Math.min(8, colors.length)
+    for (let i = 0; i < n; i++) {
+      const crate = this.add.rectangle(this.boat.x, this.boat.y, 9, 9, colors[Math.floor((i * colors.length) / n)]).setDepth(D.fx).setStrokeStyle(1.5, 0xffffff, 0.8)
+      const sx = this.boat.x
+      const sy = this.boat.y
+      this.tweens.addCounter({
+        from: 0,
+        to: 1,
+        duration: 340,
+        delay: i * 55,
+        ease: 'Sine.easeInOut',
+        onUpdate: (tw) => {
+          const t = tw.getValue() ?? 0
+          crate.setPosition(Phaser.Math.Linear(sx, tx, t), Phaser.Math.Linear(sy, ty, t) - Math.sin(t * Math.PI) * 34)
+          crate.setRotation(t * 5)
+        },
+        onComplete: () => {
+          crate.destroy()
+          this.splash.explode(2, tx, ty)
+        },
+      })
+    }
   }
 
   private flyCoins(credits: number): void {
@@ -758,6 +906,7 @@ export class GameScene extends Phaser.Scene {
     this.boatView.setUpgrades(this.model.upgrades)
     this.boatView.setCargo(this.model.cargo, this.model.capacity)
     this.refreshCargo(false)
+    this.syncTenders(false)
   }
 
   private updateHints(): void {
@@ -770,9 +919,11 @@ export class GameScene extends Phaser.Scene {
     let hint: string | null = null
     if (!this.movedOnce) hint = 'Press <b>W</b> to sail and <b>A</b> / <b>D</b> to steer'
     else if (m.removed.size === 0) hint = 'Sail into the floating plastic to scoop it up'
-    else if (m.cargoFree === 0) hint = 'Hold full! Head back to the station'
+    else if (this.tenderCalls < 3 && m.fleet.tenders.some((t) => t.status === 'idle') && used >= (m.cargoFree === 0 ? 0 : 0.5)) {
+      hint = m.cargoFree === 0 ? 'Hold full! Press <b>R</b> to call a cargo tender' : 'Press <b>R</b> to send a cargo tender to take your cargo'
+    } else if (m.cargoFree === 0) hint = 'Hold full! Head back to the station'
     else if (used >= 0.7 && m.unloads === 0) hint = 'Hold filling up - bring it to the station to earn credits'
-    else if (m.unloads > 0 && !this.upgradeHinted && !UPGRADE_IDS.some((id) => m.upgrades[id]) && m.credits >= BALANCE.upgrades.cargo.cost) {
+    else if (m.unloads > 0 && !this.upgradeHinted && m.upgrades.cargo + m.upgrades.engine + m.upgrades.width === 0 && m.credits >= UPGRADES.cargo.cost(1)) {
       hint = 'You can afford an upgrade - visit the station'
     } else if (m.unloads === 0 && m.removed.size >= 1 && m.removed.size < 4) hint = 'Collect more plastic - chain pickups for combo score'
     this.ui.setHint(hint)
@@ -809,6 +960,7 @@ export class GameScene extends Phaser.Scene {
     if (this.mode === 'win') {
       this.ui.setPrompt(null)
       this.stepBoatPhysics(dt, { throttle: 0, steer: 0, boost: false })
+      this.runFleet(dt)
       this.updateCamera(dt, false)
       return
     }
@@ -831,6 +983,7 @@ export class GameScene extends Phaser.Scene {
         // Docked: let the boat drift to a halt beside the station.
         this.stepBoatPhysics(dt, { throttle: 0, steer: 0, boost: false })
       }
+      this.runFleet(dt)
       this.updateHud(dt)
       this.hintTimer -= dt
       if (this.hintTimer <= 0) {
@@ -851,10 +1004,12 @@ export class GameScene extends Phaser.Scene {
     const esc = this.input_.consume('Escape')
     const e = this.input_.consume('KeyE')
     const enter = this.input_.consume('Enter')
+    const r = this.input_.consume('KeyR')
     switch (this.mode) {
       case 'playing':
         if (esc) this.setPaused(true)
         else if (e && inDockRange(this.boat)) this.dock()
+        else if (r) this.callTender()
         break
       case 'paused':
         if (esc) this.setPaused(false)
@@ -864,6 +1019,8 @@ export class GameScene extends Phaser.Scene {
         else if (this.input_.consume('Digit1')) this.buyUpgrade('cargo')
         else if (this.input_.consume('Digit2')) this.buyUpgrade('engine')
         else if (this.input_.consume('Digit3')) this.buyUpgrade('width')
+        else if (this.input_.consume('Digit4')) this.buyUpgrade('tender')
+        else if (this.input_.consume('Digit5')) this.buyUpgrade('fleet')
         break
       case 'win':
         if (enter || esc) this.keepSailing()
@@ -872,7 +1029,7 @@ export class GameScene extends Phaser.Scene {
         break
     }
     // Number keys outside the dock are ignored.
-    this.input_.consume('Digit1'); this.input_.consume('Digit2'); this.input_.consume('Digit3')
+    this.input_.consume('Digit1'); this.input_.consume('Digit2'); this.input_.consume('Digit3'); this.input_.consume('Digit4'); this.input_.consume('Digit5')
   }
 
   private stepBoatPhysics(dt: number, input: { throttle: number; steer: number; boost: boolean }): void {
@@ -904,7 +1061,7 @@ export class GameScene extends Phaser.Scene {
       this.wakeAcc -= 1
       const side = Math.random() < 0.5 ? -1 : 1
       const back = 30 + Math.random() * 8
-      const lateral = side * (this.model.upgrades.engine ? 6.5 : 3.5) + (Math.random() - 0.5) * 4
+      const lateral = side * (this.model.upgrades.engine >= 3 ? 8 : this.model.upgrades.engine > 0 ? 6.5 : 3.5) + (Math.random() - 0.5) * 4
       this.wake.emitParticleAt(this.boat.x - c * back - s * lateral, this.boat.y - s * back + c * lateral)
       if (ratio > 0.6 && Math.random() < 0.5) {
         // bow wave
@@ -913,7 +1070,7 @@ export class GameScene extends Phaser.Scene {
         this.wake.emitParticleAt(bx, by)
       }
     }
-    this.audio.setEngine(this.mode === 'docked' ? 0 : ratio, boosting, this.model.upgrades.engine)
+    this.audio.setEngine(this.mode === 'docked' ? 0 : ratio, boosting, this.model.upgrades.engine > 0)
   }
 
   private updateDockPrompt(): void {
