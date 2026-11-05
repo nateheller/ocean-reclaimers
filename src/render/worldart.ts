@@ -130,35 +130,60 @@ export function bakeReef(scene: Phaser.Scene, key: string, spot: ObstacleSpot, s
   const rng = new Rng(seed)
   const pad = 80
   const size = spot.r * 2 + pad * 2
-  const colors = [
-    ['#ff7aa8', '#ffc1d6'],
-    ['#ff9b54', '#ffd9a8'],
-    ['#b07cff', '#e2d0ff'],
-    ['#ff6a6a', '#ffb4ac'],
-    ['#4ee6b0', '#c4ffe9'],
-  ]
+  // Retain the old four-draw budget per colony without retaining colony artwork.
+  const samples = Array.from({ length: (12 + Math.floor(spot.r / 8)) * 4 }, () => rng.next())
   mk(scene, key, size, size, (g) => {
     const c = size / 2
-    const circ = [{ x: c, y: c, r: spot.r }]
-    layerOf(g, (t) => union(t, circ, 56, '#6fe8d6'), 0.2)
-    layerOf(g, (t) => union(t, circ, 34, '#98f4e4'), 0.3)
-    layerOf(g, (t) => union(t, circ, 14, '#ffffff'), 0.55)
-    layerOf(g, (t) => union(t, circ, 2, '#2f8f86'), 0.55)
-    const blobs = 12 + Math.floor(spot.r / 8)
-    for (let i = 0; i < blobs; i++) {
-      const a = rng.range(0, Math.PI * 2)
-      const d = spot.r * Math.sqrt(rng.next()) * 0.82
-      const r = rng.range(spot.r * 0.18, spot.r * 0.34)
-      const [dark, light] = rng.pick(colors)
-      const x = c + Math.cos(a) * d
-      const y = c + Math.sin(a) * d
-      g.fillStyle = 'rgba(0,40,70,0.25)'; g.beginPath(); g.arc(x + 2, y + 3, r, 0, Math.PI * 2); g.fill()
-      const grad = g.createRadialGradient(x - r * 0.3, y - r * 0.3, 1, x, y, r)
-      grad.addColorStop(0, light); grad.addColorStop(1, dark)
-      g.fillStyle = grad; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill()
-      g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 1.2
-      g.beginPath(); g.arc(x - r * 0.1, y - r * 0.1, r * 0.55, 0.3, 3.6); g.stroke()
+    const turn = samples[0] * Math.PI * 2
+    // Uneven spacing includes two short chipped corners and longer shelf edges.
+    const angles = [0, 27, 33, 62, 92, 121, 148, 177, 207, 236, 265, 293, 322, 329]
+    const points = angles.map((degrees, i) => {
+      const a = turn + (degrees + (samples[i + 1] - 0.5) * 2) * Math.PI / 180
+      const r = spot.r * (0.987 + samples[i + 16] * 0.013)
+      return { x: c + Math.cos(a) * r, y: c + Math.sin(a) * r }
+    })
+    const polygon = (vertices: readonly { x: number; y: number }[]) => {
+      g.beginPath()
+      vertices.forEach((p, i) => { if (i === 0) g.moveTo(p.x, p.y); else g.lineTo(p.x, p.y) })
+      g.closePath()
     }
+    // Three separate, faint water patches, with open stretches between them.
+    g.fillStyle = 'rgba(125,190,176,0.13)'
+    for (const index of [1, 6, 10]) {
+      const a = points[index]; const b = points[(index + 1) % points.length]
+      polygon([a, b,
+        { x: c + (b.x - c) * 1.1, y: c + (b.y - c) * 1.1 },
+        { x: c + (a.x - c) * 1.06, y: c + (a.y - c) * 1.06 }]); g.fill()
+    }
+    // One continuous, flat limestone shelf: no backing disk, repeated masses or inset outline.
+    polygon(points); g.fillStyle = '#b9b398'; g.fill()
+    // A narrow side face appears only along lower-facing edges, inside the solid footprint.
+    g.fillStyle = '#7f897b'
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i]; const b = points[(i + 1) % points.length]
+      if ((a.y + b.y) / 2 < c + spot.r * 0.15) continue
+      polygon([a, b,
+        { x: c + (b.x - c) * 0.95, y: b.y - 3 },
+        { x: c + (a.x - c) * 0.95, y: a.y - 3 }]); g.fill()
+    }
+    const detail = (vertices: readonly [number, number][], color: string) => {
+      polygon(vertices.map(([x, y]) => ({ x: c + x * spot.r, y: c + y * spot.r })))
+      g.fillStyle = color; g.fill()
+    }
+    // Three broad facets, rather than a highlight on every individual stone.
+    detail([[-0.7, -0.28], [-0.3, -0.72], [0.28, -0.5], [0.08, -0.1]], '#c7bea1')
+    detail([[0.08, -0.1], [0.28, -0.5], [0.72, -0.13], [0.48, 0.4]], '#aaa98f')
+    detail([[-0.7, -0.28], [0.08, -0.1], [-0.18, 0.57], [-0.6, 0.3]], '#b0af93')
+    g.strokeStyle = '#858d7c'; g.lineWidth = 1.3; g.lineCap = 'round'
+    g.beginPath(); g.moveTo(c - spot.r * 0.35, c - spot.r * 0.1)
+    g.lineTo(c - spot.r * 0.13, c + spot.r * 0.02); g.lineTo(c - spot.r * 0.06, c + spot.r * 0.18); g.stroke()
+    g.beginPath(); g.moveTo(c + spot.r * 0.24, c + spot.r * 0.28)
+    g.lineTo(c + spot.r * 0.37, c + spot.r * 0.4); g.lineTo(c + spot.r * 0.5, c + spot.r * 0.38); g.stroke()
+    // Just two low-contrast algae patches, both well inside the shelf.
+    detail([[-0.57, -0.2], [-0.42, -0.38], [-0.19, -0.34], [-0.28, -0.16], [-0.47, -0.08]], '#939f7e')
+    detail([[0.22, 0.05], [0.43, -0.04], [0.53, 0.08], [0.37, 0.19]], '#96a487')
+    // One restrained coral accent, not another colony or ring.
+    detail([[-0.36, 0.38], [-0.38, 0.3], [-0.31, 0.32], [-0.27, 0.25], [-0.23, 0.35], [-0.27, 0.42]], '#a18f8e')
   })
   return { key, x: spot.x - size / 2, y: spot.y - size / 2 }
 }
