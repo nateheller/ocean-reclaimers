@@ -194,6 +194,10 @@ kbd {
 @keyframes slidein { from { opacity: 0; transform: translate(30px, -50%); } to { opacity: 1; transform: translate(0, -50%); } }
 .dock header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .dock header b { font-size: 18px; letter-spacing: .04em; }
+.dock { max-width: calc(100vw - 16px); overscroll-behavior: contain; }
+.dock footer { position: sticky; bottom: -14px; padding: 8px 0; background: #0a3458; z-index: 1; }
+.dock .uhead { flex-wrap: wrap; gap: 2px 8px; }
+.dock .fx { white-space: normal; overflow-wrap: anywhere; }
 .bal { font-size: 20px; font-weight: 700; color: var(--gold); display: inline-flex; align-items: center; gap: 2px; }
 .sum { margin-bottom: 10px; padding: 8px 12px; border-radius: 12px; background: rgba(255, 255, 255, .1); font-size: 14px; }
 .sum.good { background: rgba(62, 230, 193, .18); border: 1px solid rgba(62, 230, 193, .5); }

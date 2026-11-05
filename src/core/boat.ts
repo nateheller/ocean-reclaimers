@@ -13,6 +13,9 @@ export interface BoatState {
   turnVel: number
   boostLeft: number
   boostCooldown: number
+  /** Captured on activation: purchases apply to the next burst, never resize an active cycle. */
+  boostCycleDuration: number
+  boostCycleCooldown: number
 }
 
 export interface BoatInput {
@@ -34,7 +37,8 @@ export interface StepEvents {
 }
 
 export function createBoat(x: number = WORLD.spawn.x, y: number = WORLD.spawn.y, heading: number = WORLD.spawn.heading): BoatState {
-  return { x, y, heading, vx: 0, vy: 0, turnVel: 0, boostLeft: 0, boostCooldown: 0 }
+  return { x, y, heading, vx: 0, vy: 0, turnVel: 0, boostLeft: 0, boostCooldown: 0,
+    boostCycleDuration: BALANCE.boat.boostDuration, boostCycleCooldown: BALANCE.boat.boostCooldown }
 }
 
 export function boatSpeed(b: BoatState): number {
@@ -47,9 +51,9 @@ export function isBoosting(b: BoatState): boolean {
 
 /** 0 = ready .. 1 = just used. */
 export function boostCooldownFraction(b: BoatState): number {
-  const total = BALANCE.boat.boostDuration + BALANCE.boat.boostCooldown
-  const remaining = b.boostLeft + b.boostCooldown
-  return Math.min(1, remaining / total)
+  const total = b.boostCycleDuration + b.boostCycleCooldown
+  const remaining = b.boostLeft > 0 ? b.boostLeft + b.boostCycleCooldown : b.boostCooldown
+  return Math.max(0, Math.min(1, remaining / total))
 }
 
 export function boostReady(b: BoatState): boolean {
@@ -62,14 +66,16 @@ export function stepBoat(b: BoatState, input: BoatInput, stats: VesselStats, dt:
 
   // Boost timers.
   if (input.boost && boostReady(b)) {
-    b.boostLeft = P.boostDuration
+    b.boostCycleDuration = stats.boostDuration
+    b.boostCycleCooldown = stats.boostCooldown
+    b.boostLeft = b.boostCycleDuration
     ev.boostStarted = true
   }
   if (b.boostLeft > 0) {
     b.boostLeft -= dt
     if (b.boostLeft <= 0) {
       b.boostLeft = 0
-      b.boostCooldown = P.boostCooldown
+      b.boostCooldown = b.boostCycleCooldown
       ev.boostEnded = true
     }
   } else if (b.boostCooldown > 0) {

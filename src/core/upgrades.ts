@@ -14,7 +14,7 @@ export type { UpgradeId }
 export type UpgradeLevels = Record<UpgradeId, number>
 
 /** Display / hotkey order. Keys 1-5 keep their v0.2 meaning; 6-8 are new. */
-export const UPGRADE_IDS: readonly UpgradeId[] = ['cargo', 'engine', 'width', 'tender', 'fleet', 'sonar', 'trawler', 'trawlerFleet']
+export const UPGRADE_IDS: readonly UpgradeId[] = ['cargo', 'engine', 'width', 'tender', 'fleet', 'sonar', 'trawler', 'trawlerFleet', 'boostReserve', 'boostRecovery']
 
 export interface UpgradeContext {
   readonly levels: Readonly<UpgradeLevels>
@@ -45,6 +45,18 @@ function price(base: readonly number[], level: number): number {
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
 export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
+  boostReserve: {
+    id: 'boostReserve', name: BALANCE.upgrades.boostReserve.name,
+    category: 'vessel', tags: ['vessel', 'boost'], maxLevel: 3,
+    cost: (l) => price(BALANCE.upgrades.boostReserve.baseCosts, l),
+    effect: (l) => `Boost lasts ${BALANCE.upgrades.boostReserve.duration[l]} s`,
+  },
+  boostRecovery: {
+    id: 'boostRecovery', name: BALANCE.upgrades.boostRecovery.name,
+    category: 'vessel', tags: ['vessel', 'boost'], maxLevel: 3,
+    cost: (l) => price(BALANCE.upgrades.boostRecovery.baseCosts, l),
+    effect: (l) => `Ready ${BALANCE.upgrades.boostRecovery.cooldown[l]} s after boost`,
+  },
   cargo: {
     id: 'cargo',
     name: BALANCE.upgrades.cargo.name,
@@ -163,7 +175,7 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
 }
 
 export function noUpgrades(): UpgradeLevels {
-  return { cargo: 0, engine: 0, width: 0, tender: 0, fleet: 0, sonar: 0, trawler: 0, trawlerFleet: 0 }
+  return { cargo: 0, engine: 0, width: 0, tender: 0, fleet: 0, sonar: 0, trawler: 0, trawlerFleet: 0, boostReserve: 0, boostRecovery: 0 }
 }
 
 export function totalCost(id: UpgradeId): number {

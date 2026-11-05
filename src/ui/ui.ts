@@ -106,6 +106,8 @@ const ICONS = {
 }
 
 const UPGRADE_ICON: Record<UpgradeId, string> = {
+  boostReserve: ICONS.boost,
+  boostRecovery: ICONS.upEngine,
   cargo: ICONS.upCargo,
   engine: ICONS.upEngine,
   width: ICONS.upWidth,
@@ -118,6 +120,7 @@ const UPGRADE_ICON: Record<UpgradeId, string> = {
 
 /** Group headings shown above the first row of each shop group. */
 const DOCK_GROUP: Partial<Record<UpgradeId, string>> = {
+  boostReserve: 'Boost systems',
   tender: 'Cargo tenders',
   sonar: 'Exploration',
   trawler: 'Auto trawlers',
@@ -617,7 +620,7 @@ export class GameUI {
       const lv = def.maxLevel > 1 ? `<span class="lv">Lv ${level}/${def.maxLevel}</span>` : level >= 1 ? '<span class="lv">Built</span>' : ''
       const group = DOCK_GROUP[id]
       const sep = group ? ' sep' : ''
-      return `<div class="up ${state}${sep}" data-up="${id}"${group ? ` data-sep="${group}"` : ''}><kbd>${i + 1}</kbd><i class="uico">${UPGRADE_ICON[id]}</i><div class="utext"><div class="uhead"><b>${def.name}</b>${lv}</div><div class="pips">${pips}</div>${fx}${note}</div>${action}</div>`
+      return `<div class="up ${state}${sep}" data-up="${id}"${group ? ` data-sep="${group}"` : ''}><kbd>${(i + 1) % 10}</kbd><i class="uico">${UPGRADE_ICON[id]}</i><div class="utext"><div class="uhead"><b>${def.name}</b>${lv}</div><div class="pips">${pips}</div>${fx}${note}</div>${action}</div>`
     }).join('')
     this.dock.innerHTML = `
       <header><b>Reclamation Station</b><span class="bal"><i class="ico sm">${ICONS.coin}</i>${data.credits}</span></header>

@@ -18,6 +18,7 @@ export class BoatView {
   private readonly arms: Phaser.GameObjects.Graphics
   private readonly hold: Phaser.GameObjects.Graphics
   private readonly engines: Phaser.GameObjects.Graphics
+  private readonly boostModule: Phaser.GameObjects.Graphics
   private readonly flame: Phaser.GameObjects.Image
   private readonly sonar: Phaser.GameObjects.Graphics
   private readonly sweep: Phaser.GameObjects.Graphics
@@ -32,10 +33,11 @@ export class BoatView {
     this.hull = scene.add.image(0, 0, 'boat_hull').setScale(1 / TS)
     this.hold = scene.add.graphics()
     this.engines = scene.add.graphics()
+    this.boostModule = scene.add.graphics()
     this.flame = scene.add.image(-40, 0, 'glow').setTint(0xffa43a).setScale(0.3).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD)
     this.sonar = scene.add.graphics().setPosition(SONAR_X, 0).setScale(SONAR_SCALE)
     this.sweep = scene.add.graphics().setPosition(SONAR_X, 0).setScale(SONAR_SCALE)
-    this.container = scene.add.container(0, 0, [this.arms, this.engines, this.hull, this.hold, this.sonar, this.sweep, this.flame]).setDepth(depth)
+    this.container = scene.add.container(0, 0, [this.arms, this.engines, this.hull, this.hold, this.boostModule, this.sonar, this.sweep, this.flame]).setDepth(depth)
     this.redrawAll()
   }
 
@@ -44,8 +46,8 @@ export class BoatView {
     this.upgrades = { ...up }
     this.redrawAll()
     if (animate) {
-      const popped = (['cargo', 'engine', 'width', 'sonar'] as const).find((k) => up[k] > before[k])
-      const target = popped === 'width' ? this.arms : popped === 'engine' ? this.engines : popped === 'sonar' ? this.sonar : this.hold
+      const popped = (['cargo', 'engine', 'width', 'sonar', 'boostReserve', 'boostRecovery'] as const).find((k) => up[k] > before[k])
+      const target = popped === 'boostReserve' || popped === 'boostRecovery' ? this.boostModule : popped === 'width' ? this.arms : popped === 'engine' ? this.engines : popped === 'sonar' ? this.sonar : this.hold
       const rest = target === this.sonar ? SONAR_SCALE : 1
       target.setScale(rest * 0.6)
       this.scene.tweens.add({ targets: target, scaleX: rest, scaleY: rest, duration: 520, ease: 'Back.easeOut' })
@@ -83,6 +85,32 @@ export class BoatView {
     this.drawEngines()
     this.drawHold()
     this.drawSonar()
+    this.drawBoostModule()
+  }
+
+  /** One compact stern assembly; redrawn on upgrades, never in the frame loop. */
+  private drawBoostModule(): void {
+    const g = this.boostModule
+    const reserve = this.upgrades.boostReserve
+    const recovery = this.upgrades.boostRecovery
+    g.clear()
+    if (reserve === 0 && recovery === 0) return
+    const width = 6 + reserve * 1.5
+    const height = reserve >= 2 ? 17 : 12
+    g.fillStyle(0x264c60, 1); g.fillRoundedRect(-36, -height / 2, width, height, 2)
+    g.fillStyle(reserve >= 3 ? 0x3ee6c1 : 0x5bbccc, 1)
+    if (reserve >= 2) {
+      g.fillRoundedRect(-35, -7, width - 2, 5, 1.5)
+      g.fillRoundedRect(-35, 2, width - 2, 5, 1.5)
+    } else g.fillRoundedRect(-35, -4, width - 2, 8, 1.5)
+    if (reserve >= 3) {
+      g.lineStyle(1.5, 0xffd23f, 1); g.lineBetween(-33, -8, -33, 8)
+    }
+    // Recovery remains independent: cooling fins are visible even without Reserve.
+    for (let i = 0; i < recovery; i++) {
+      const x = -35 + i * 3
+      g.fillStyle(0xe1e9df, 1); g.fillRect(x, -height / 2 - 2, 1.5, height + 4)
+    }
   }
 
   /** The sonar mast: a whip aerial, then a dish, a twin dish with a light, a radome, and finally a scanning radome. */

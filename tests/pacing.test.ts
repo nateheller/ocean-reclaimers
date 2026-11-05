@@ -245,6 +245,7 @@ const STRATEGIES: Record<string, Plan> = {
   '3 Auto trawlers': [['cargo', 1], ['trawler', 2], ['engine', 2], ['width', 2], ['cargo', 2], ['trawler', 4], ['trawlerFleet', 1], ['engine', 3], ['width', 3], ['cargo', 3], ['trawler', 5], ...BOAT],
   '4 Early sonar': [['sonar', 2], ['cargo', 1], ['engine', 2], ['width', 2], ['tender', 1], ['sonar', 4], ['cargo', 3], ...BOAT],
   '5 Balanced': [['cargo', 1], ['trawler', 1], ['engine', 2], ['tender', 1], ['sonar', 1], ['width', 2], ['trawler', 3], ['tender', 3], ['cargo', 3], ['sonar', 3], ['trawlerFleet', 1], ['tender', 5], ['trawler', 5], ...BOAT],
+  '6 Boost systems': [['boostReserve', 1], ['boostRecovery', 1], ['cargo', 1], ['engine', 2], ['boostReserve', 3], ['boostRecovery', 3], ...BOAT],
 }
 
 describe('purchasing strategies (greedy bot)', () => {

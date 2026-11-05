@@ -41,7 +41,8 @@ Requires Node 20+. `dist/` is fully static (relative base), so it can be hosted 
 | `Space` | Boost (short burst, then a cooldown) |
 | `E` | Unload and open the upgrade menu when near the station |
 | `R` | Call a Cargo Tender to take cargo from your hold (once you own one) |
-| `1` - `8` | Buy an upgrade while docked (or click it) |
+| `1` - `8` | Buy the existing upgrades while docked (or click them) |
+| `9` / `0` | Buy Boost Reserve / Boost Recovery while docked |
 | `Tab` | Expand / collapse the minimap |
 | `Esc` | Pause (or leave the dock menu) |
 | `M` | Mute / unmute |
@@ -70,7 +71,7 @@ Cargo Tenders are unchanged - they work exactly as in v0.2.
 2. Items must fit entirely: **bottle** 1 cargo / 2 credits, **container** 2 / 4, **fishing net** 4 / 10. There is no
    partial collection. Your hold starts at 20 units.
 3. Return to the glowing station ring and press `E` to unload everything and bank the credits.
-4. Spend credits at the station (eight rows, each with a short effect line):
+4. Spend credits at the station (ten scrollable rows, each with a short effect line):
    * **Cargo Hold**, **Engine**, **Collection Arms** - five levels each; they visibly change the boat.
    * **Cargo Tender** (5 levels) and **Second Tender** - see v0.2 notes below.
    * **Ocean Sonar** (5 levels) - detection.
@@ -80,6 +81,26 @@ Cargo Tenders are unchanged - they work exactly as in v0.2.
 6. Reach 25%, 50% and 75% cleaned for clearer water, returning coral colors and more wildlife.
 
 Collisions with islands, reefs and rocks are solid but harmless: you slide along them.
+
+### Boost systems
+
+Space starts a timed forward burst: **x1.55 speed and x2 acceleration**, with steering available. It is not an energy
+or fuel system. Engine upgrades still multiply the underlying speed and acceleration. Reserve and Recovery are
+independent, optional three-level tracks, with no prerequisites:
+
+| Level | Boost duration | Reserve price | Cooldown after burst | Recovery price |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 1.5 s | - | 4.5 s | - |
+| 1 | 2.0 s | 14 | 3.75 s | 16 |
+| 2 | 2.5 s | 28 | 3.0 s | 30 |
+| 3 | 3.0 s | 46 | 2.5 s | 50 |
+
+The HUD fills continuously from activation through cooldown until boost is ready. Each activation captures its
+current duration and cooldown: purchases during a burst or cooldown affect **the next activation**. A compact stern
+module shows Reserve stages; cooling fins show Recovery levels. Old saves default missing tracks to zero. Saves
+retain purchased levels, but loading still restores a stationary boat with boost ready, not an in-progress timer.
+The station scrolls on short screens; Set sail stays accessible. Keys 1-8 keep their existing meanings, followed by
+9 for Reserve and 0 for Recovery. These costs and the maximum boost duty cycle still need human playtesting.
 
 ### Cargo Tender (unchanged from v0.2)
 
@@ -189,14 +210,14 @@ are offered. If the score makes the top 10 you can enter a name (12 characters m
 trimmed, upper-cased and restricted to safe characters; comparisons for **personal bests** use the same normalised
 name. Beating your best shows *NEW PERSONAL BEST!* with previous / new / improvement. One expedition can be recorded only
 once (its `runId` is remembered), even if you keep sailing, reload, or submit twice. Entries store: name, region
-(`coral-bay`), mode (`full-cleanup` for new runs), final and base score, time, multiplier, best combo, map seed, balance version and
+(`coral-bay`), mode (`full-cleanup-boost` for new runs), final and base score, time, multiplier, best combo, map seed, balance version and
 date, and boards are keyed by region + mode, so future challenge modes will not be mixed with standard runs.
 Records live under `oceanreclaimers.scores.v1`, separate from the expedition save, so **New Game never erases scores**.
 
-New 100% cleanup scores have their own board and personal bests. The **Historical 75% Scores** button keeps the old
+New boost-rule 100% cleanup scores have their own board and personal bests (`full-cleanup-boost`, balance version `0.3.1-boost`). Original 100% scores remain in `full-cleanup`, and historical 75% scores remain in `standard`. Use the score-panel category button to cycle through all three boards; pending old results keep their original category. The **Historical 75% Scores** button keeps the old
 `standard` board accessible; records are not moved or deleted. Old pending results still submit to that historical
 board. Already-completed saves keep their original frozen score/time and Keep Sailing behavior; unfinished saves
-adopt the 100% goal. Save format remains v3: only new completion records add optional `goal: 1` to identify full cleanup.
+adopt the 100% goal. Save format remains v3: full-cleanup completions have optional `goal: 1`, and new completions also carry `rules: "boost"` to keep score categories separate. Unfinished runs adopt the new rules.
 
 Debris direction arrows use the same geometry and 10-pixels-per-metre distance scale as the yellow station arrow,
 with teal/sea-green styling and positive labels such as **Debris 150 m**. Labels update as the boat moves. Overlapping
@@ -323,7 +344,7 @@ incomparable.
 
 * `pnpm test`: 128 tests pass. `pnpm build`: succeeds.
 * Checked by hand in a browser (screenshots): HUD, minimap, edge arrows, sonar mast and pulse, trawlers and chips, the
-  eight-row dock menu, completion screen, name entry, high-score table, personal-best text, and loading a migrated
+  scrollable ten-row dock menu, completion screen, name entry, high-score table, personal-best text, and loading a migrated
   save.
 * **Not done:** no human playtest of v0.3. Balance, the usefulness of sonar and the trawler-versus-score trade-off are
   unverified by people. Not tested on touch devices, gamepads or real GPUs.

@@ -53,6 +53,8 @@ export function timeBandLabel(seconds: number): string {
 export interface Completion {
   /** Missing on historical 75% results; new full-cleanup runs record 1. */
   goal?: 1
+  /** Separates results under the expanded boost rules from pre-upgrade full-cleanup runs. */
+  rules?: 'boost'
   /** Random id of the expedition; the key that prevents duplicate leaderboard submissions. */
   runId: string
   /** Active play time when the goal was first reached (seconds, hundredths). */
@@ -70,6 +72,7 @@ export function makeCompletion(runId: string, timeSeconds: number, baseScore: nu
   const multiplier = timeMultiplier(t)
   return {
     goal: 1,
+    rules: 'boost',
     runId,
     timeSeconds: t,
     baseScore,

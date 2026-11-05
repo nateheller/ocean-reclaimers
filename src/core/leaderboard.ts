@@ -53,7 +53,8 @@ export interface BoardRef {
 
 export const STANDARD_BOARD: BoardRef = { region: BALANCE.scoring.region, mode: BALANCE.scoring.mode }
 export const HISTORICAL_BOARD: BoardRef = { region: BALANCE.scoring.region, mode: 'standard' }
-export const completionBoard = (completion: Completion): BoardRef => completion.goal === 1 ? STANDARD_BOARD : HISTORICAL_BOARD
+export const PRE_BOOST_BOARD: BoardRef = { region: BALANCE.scoring.region, mode: 'full-cleanup' }
+export const completionBoard = (completion: Completion): BoardRef => completion.goal !== 1 ? HISTORICAL_BOARD : completion.rules === 'boost' ? STANDARD_BOARD : PRE_BOOST_BOARD
 
 export const boardKey = (b: BoardRef = STANDARD_BOARD): string => `${b.region}:${b.mode}`
 
@@ -236,7 +237,7 @@ export function submitScore(storage: StorageLike, input: SubmitInput): SubmitRes
     multiplier: c.multiplier,
     bestChain: c.bestChain,
     seed: WORLD.seed,
-    balanceVersion: input.balanceVersion ?? (c.goal === 1 ? BALANCE.scoring.balanceVersion : '0.3.0'),
+    balanceVersion: input.balanceVersion ?? (c.rules === 'boost' ? BALANCE.scoring.balanceVersion : c.goal === 1 ? '0.3.1' : '0.3.0'),
     date: (input.now ?? new Date()).toISOString(),
   }
   const key = boardKey(board)

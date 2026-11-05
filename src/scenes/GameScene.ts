@@ -22,7 +22,7 @@ import {
   stepBoat,
   type BoatState,
 } from '../core/boat'
-import { alreadySubmitted, loadScores, markSubmitted, rankFor, completionBoard, HISTORICAL_BOARD, STANDARD_BOARD, submitScore, topScores } from '../core/leaderboard'
+import { alreadySubmitted, loadScores, markSubmitted, rankFor, completionBoard, HISTORICAL_BOARD, PRE_BOOST_BOARD, STANDARD_BOARD, submitScore, topScores } from '../core/leaderboard'
 import { GameModel } from '../core/model'
 import { debrisLabel, indicatorsOverlap, edgeIndicator, metres, type ViewRect } from '../core/navigation'
 import { timeBandLabel } from '../core/scoring'
@@ -1055,7 +1055,7 @@ export class GameScene extends Phaser.Scene {
         improvement: res.improvement,
         entries: res.entries,
       })
-      this.showScores(res.entry.id, c.goal !== 1)
+      this.showScores(res.entry.id, c.goal !== 1 ? 2 : c.rules === 'boost' ? 0 : 1)
     } else if (res.reason === 'duplicate') {
       c.entry = 'saved'
       this.ui.showScoreError('This expedition is already on the leaderboard.')
@@ -1079,13 +1079,13 @@ export class GameScene extends Phaser.Scene {
     c.entry = 'saved'
   }
 
-  private showScores(highlightId: string | null, historical = false): void {
+  private showScores(highlightId: string | null, category = 0): void {
     const store = loadScores(this.storage)
     this.ui.showScores({
-      title: historical ? 'Coral Bay - Historical 75% runs' : 'Coral Bay - 100% cleanup',
-      entries: topScores(store, historical ? HISTORICAL_BOARD : STANDARD_BOARD), highlightId,
-      alternateLabel: historical ? '100% Cleanup Scores' : 'Historical 75% Scores',
-      onAlternate: () => this.showScores(null, !historical),
+      title: ['Coral Bay - 100% cleanup (Boost upgrades)', 'Coral Bay - 100% cleanup (Original)', 'Coral Bay - Historical 75% runs'][category],
+      entries: topScores(store, [STANDARD_BOARD, PRE_BOOST_BOARD, HISTORICAL_BOARD][category]), highlightId,
+      alternateLabel: ['Original 100% Scores', 'Historical 75% Scores', 'Boost Upgrade Scores'][category],
+      onAlternate: () => this.showScores(null, (category + 1) % 3),
     })
   }
 
@@ -1294,6 +1294,8 @@ export class GameScene extends Phaser.Scene {
         else if (this.input_.consume('Digit6')) this.buyUpgrade('sonar')
         else if (this.input_.consume('Digit7')) this.buyUpgrade('trawler')
         else if (this.input_.consume('Digit8')) this.buyUpgrade('trawlerFleet')
+        else if (this.input_.consume('Digit9')) this.buyUpgrade('boostReserve')
+        else if (this.input_.consume('Digit0')) this.buyUpgrade('boostRecovery')
         break
       case 'win':
         // Enter inside the name field submits the form (the input module ignores keys typed into it).
@@ -1303,7 +1305,7 @@ export class GameScene extends Phaser.Scene {
         break
     }
     // Number keys outside the dock are ignored.
-    for (const k of ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Tab']) this.input_.consume(k)
+    for (const k of ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Tab']) this.input_.consume(k)
   }
 
   private stepBoatPhysics(dt: number, input: { throttle: number; steer: number; boost: boolean }): void {
