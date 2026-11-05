@@ -251,13 +251,13 @@ describe('cleanup progress', () => {
     expect(m.progress).toBeCloseTo(6 / 12)
   })
 
-  it('fires the 25 / 50 / 75% milestones exactly once and completes at 75%', () => {
+  it('fires the 25 / 50 / 75% milestones exactly once and completes at 100%', () => {
     const m = modelWith(Array(20).fill('bottle') as DebrisSpawn['type'][])
     const seen: number[] = []
     for (let i = 0; i < 20; i++) {
       const r = m.collect(i, i * 5)
       if (r.ok) seen.push(...r.newMilestones)
-      if (i === 3) expect(m.completed).toBe(false)
+      if (i < 19) expect(m.completed).toBe(false)
       if (m.cargoFree === 0) m.unload()
     }
     expect(seen).toEqual([0.25, 0.5, 0.75])

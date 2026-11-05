@@ -104,7 +104,7 @@ export function simulate(
   let route: { x: number; y: number }[] = []
   let routeTimer = 0
   let routeKey = ''
-  while (t < 60 * maxMinutes && m.progress < 0.75) {
+  while (t < 60 * maxMinutes && m.progress < BALANCE.progress.completion) {
     t += dt
     if (trace && t >= nextTrace) {
       nextTrace += 30
@@ -195,7 +195,7 @@ describe('pacing with trawlers (greedy bot)', () => {
   // eslint-disable-next-line no-console
   console.log(report('with tenders + trawlers + sonar', full))
   it('still finishes, and trawlers shorten the expedition without replacing the player', () => {
-    expect(full.progress).toBeGreaterThanOrEqual(0.75)
+    expect(full.progress).toBeGreaterThanOrEqual(1)
     expect(full.model.trawlers.count).toBeLessThanOrEqual(2)
   }, 120_000)
 })
@@ -209,7 +209,7 @@ describe('pacing (greedy bot)', () => {
   it('reaches the first upgrade within a few minutes and finishes the expedition in a reasonable session', () => {
     expect(withTenders.buys.length).toBeGreaterThan(0)
     expect(withTenders.buys[0].t).toBeLessThan(240)
-    expect(withTenders.progress).toBeGreaterThanOrEqual(0.75)
+    expect(withTenders.progress).toBeGreaterThanOrEqual(1)
     expect(withTenders.t).toBeLessThan(60 * 20)
   }, 120_000)
 
@@ -245,6 +245,7 @@ const STRATEGIES: Record<string, Plan> = {
   '3 Auto trawlers': [['cargo', 1], ['trawler', 2], ['engine', 2], ['width', 2], ['cargo', 2], ['trawler', 4], ['trawlerFleet', 1], ['engine', 3], ['width', 3], ['cargo', 3], ['trawler', 5], ...BOAT],
   '4 Early sonar': [['sonar', 2], ['cargo', 1], ['engine', 2], ['width', 2], ['tender', 1], ['sonar', 4], ['cargo', 3], ...BOAT],
   '5 Balanced': [['cargo', 1], ['trawler', 1], ['engine', 2], ['tender', 1], ['sonar', 1], ['width', 2], ['trawler', 3], ['tender', 3], ['cargo', 3], ['sonar', 3], ['trawlerFleet', 1], ['tender', 5], ['trawler', 5], ...BOAT],
+  '6 Boost systems': [['boostReserve', 1], ['boostRecovery', 1], ['cargo', 1], ['engine', 2], ['boostReserve', 3], ['boostRecovery', 3], ...BOAT],
 }
 
 describe('purchasing strategies (greedy bot)', () => {
@@ -278,7 +279,7 @@ describe('purchasing strategies (greedy bot)', () => {
 
   it('every strategy finishes Coral Bay, with a first upgrade inside two minutes', () => {
     for (const x of rows) {
-      expect(x.r.progress, x.name).toBeGreaterThanOrEqual(0.75)
+      expect(x.r.progress, x.name).toBeGreaterThanOrEqual(1)
       expect(x.firstUpgrade, x.name).toBeLessThan(120)
     }
   }, 300_000)

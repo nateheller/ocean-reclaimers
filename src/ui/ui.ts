@@ -38,6 +38,7 @@ export interface TenderChip {
 
 /** What the completion panel shows (all numbers are final; the UI only formats them). */
 export interface CompletionView {
+  goal: 75 | 100
   timeSeconds: number
   bandLabel: string
   baseScore: number
@@ -67,6 +68,8 @@ export interface SavedScoreView {
 }
 
 export interface ScoresView {
+  alternateLabel?: string
+  onAlternate?: () => void
   title: string
   entries: readonly ScoreEntry[]
   highlightId: string | null
@@ -103,6 +106,8 @@ const ICONS = {
 }
 
 const UPGRADE_ICON: Record<UpgradeId, string> = {
+  boostReserve: ICONS.boost,
+  boostRecovery: ICONS.upEngine,
   cargo: ICONS.upCargo,
   engine: ICONS.upEngine,
   width: ICONS.upWidth,
@@ -115,6 +120,7 @@ const UPGRADE_ICON: Record<UpgradeId, string> = {
 
 /** Group headings shown above the first row of each shop group. */
 const DOCK_GROUP: Partial<Record<UpgradeId, string>> = {
+  boostReserve: 'Boost systems',
   tender: 'Cargo tenders',
   sonar: 'Exploration',
   trawler: 'Auto trawlers',
@@ -185,7 +191,7 @@ export class GameUI {
         <div class="pill" id="p-cargo"><i class="ico">${ICONS.cargo}</i><div class="stack"><span class="lbl">Cargo</span><b class="val" id="v-cargo">0/20</b><div class="bar"><div id="b-cargo"></div></div></div></div>
         <div class="pill" id="p-credits"><i class="ico">${ICONS.coin}</i><div class="stack"><span class="lbl">Credits</span><b class="val" id="v-credits">0</b></div></div>
         <div class="pill wide" id="p-clean"><i class="ico">${ICONS.wave}</i><div class="stack"><span class="lbl">Coral Bay cleaned</span><b class="val" id="v-clean">0%</b>
-          <div class="bar clean"><div id="b-clean"></div><span class="tick" style="left:25%"></span><span class="tick" style="left:50%"></span><span class="tick goal" style="left:75%"></span></div></div></div>
+          <div class="bar clean"><div id="b-clean"></div><span class="tick" style="left:25%"></span><span class="tick" style="left:50%"></span><span class="tick" style="left:75%"></span><span class="tick goal" style="left:100%"></span></div></div></div>
       </div>
       <div class="hud hud-tr">
         <div class="pill small"><i class="ico">${ICONS.star}</i><div class="stack"><span class="lbl">Score</span><b class="val" id="v-score">0</b></div></div>
@@ -614,7 +620,7 @@ export class GameUI {
       const lv = def.maxLevel > 1 ? `<span class="lv">Lv ${level}/${def.maxLevel}</span>` : level >= 1 ? '<span class="lv">Built</span>' : ''
       const group = DOCK_GROUP[id]
       const sep = group ? ' sep' : ''
-      return `<div class="up ${state}${sep}" data-up="${id}"${group ? ` data-sep="${group}"` : ''}><kbd>${i + 1}</kbd><i class="uico">${UPGRADE_ICON[id]}</i><div class="utext"><div class="uhead"><b>${def.name}</b>${lv}</div><div class="pips">${pips}</div>${fx}${note}</div>${action}</div>`
+      return `<div class="up ${state}${sep}" data-up="${id}"${group ? ` data-sep="${group}"` : ''}><kbd>${(i + 1) % 10}</kbd><i class="uico">${UPGRADE_ICON[id]}</i><div class="utext"><div class="uhead"><b>${def.name}</b>${lv}</div><div class="pips">${pips}</div>${fx}${note}</div>${action}</div>`
     }).join('')
     this.dock.innerHTML = `
       <header><b>Reclamation Station</b><span class="bal"><i class="ico sm">${ICONS.coin}</i>${data.credits}</span></header>
@@ -669,7 +675,7 @@ export class GameUI {
       <div class="card win-card">
         <div class="ribbon">Expedition complete</div>
         <h2>CORAL BAY COMPLETE!</h2>
-        <p>75% of the starting debris is gone. The water is clear and the sea is full of life.</p>
+        <p>${d.goal}% of the starting debris is gone. The water is clear and the sea is full of life.</p>
         <div class="calc">
           <div class="row"><span>Cleanup time</span><b>${formatTime(d.timeSeconds)}</b></div>
           <div class="row"><span>Arcade score</span><b>${n(d.baseScore)}</b></div>
@@ -765,11 +771,12 @@ export class GameUI {
         ${
           v.entries.length > 0
             ? `<table class="board"><thead><tr><th>#</th><th>Name</th><th>Score</th><th>Time</th><th>Bonus</th><th>Date</th></tr></thead><tbody>${rows}</tbody></table>`
-            : '<div class="empty">No scores yet &ndash; clean 75% of Coral Bay to set the first one.</div>'
+            : '<div class="empty">No scores yet &ndash; complete a run in this category to set the first one.</div>'
         }
-        <div class="btns"><button class="btn primary" data-close tabindex="-1">Close</button></div>
+        <div class="btns"><button class="btn" data-alternate tabindex="-1">${v.alternateLabel ?? 'Other Scores'}</button><button class="btn primary" data-close tabindex="-1">Close</button></div>
         <p class="fine">Final score = arcade score &times; time multiplier. Scores are stored on this device only.</p>
       </div>`
+    this.scores.querySelector<HTMLButtonElement>('[data-alternate]')?.addEventListener('click', () => v.onAlternate?.())
     this.scores.hidden = false
   }
 

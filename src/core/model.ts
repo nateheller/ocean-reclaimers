@@ -85,13 +85,13 @@ export class GameModel {
   readonly field: DebrisField
   /** Identifies this expedition; the key that stops one run being submitted to the leaderboard twice. */
   runId = makeRunId()
-  /** Captured exactly once, the moment 75% is first reached. */
+  /** Captured exactly once, the moment 100% is first reached. */
   completion: Completion | null = null
   readonly removed = new Set<number>()
   readonly milestones = new Set<number>()
   readonly combo = new ComboTracker()
   playSeconds = 0
-  /** Set once the primary 75% goal has been reached. */
+  /** Set once the primary 100% goal has been reached. */
   completed = false
 
   private removedUnits = 0

@@ -7,7 +7,7 @@
  */
 
 export type DebrisType = 'bottle' | 'container' | 'net'
-export type UpgradeId = 'cargo' | 'engine' | 'width' | 'tender' | 'fleet' | 'sonar' | 'trawler' | 'trawlerFleet'
+export type UpgradeId = 'cargo' | 'engine' | 'width' | 'tender' | 'fleet' | 'sonar' | 'trawler' | 'trawlerFleet' | 'boostReserve' | 'boostRecovery'
 
 export interface DebrisSpec {
   /** Cargo units occupied in the hold. */
@@ -86,6 +86,8 @@ export const BALANCE = {
    */
   upgrades: {
     priceScale: 0.2,
+    boostReserve: { id: 'boostReserve', name: 'Boost Reserve', baseCosts: [70, 140, 230], duration: [1.5, 2, 2.5, 3] },
+    boostRecovery: { id: 'boostRecovery', name: 'Boost Recovery', baseCosts: [80, 150, 250], cooldown: [4.5, 3.75, 3, 2.5] },
     /** Cargo Hold: +5 units per level, 20 -> 45. */
     cargo: { id: 'cargo', name: 'Cargo Hold', perLevel: 5, baseCosts: [35, 60, 95, 145, 220] },
     /** Engine: +5% base speed and acceleration per level (relative to the original), up to +25%. */
@@ -183,11 +185,11 @@ export const BALANCE = {
    */
   assist: {
     /** Subtle hint toward the nearest remaining concentration. */
-    hintAt: 0.6,
+    hintAt: 0.75,
     /** Clear directional guidance toward substantial concentrations. */
-    guidanceAt: 0.65,
+    guidanceAt: 0.75,
     /** Help locating isolated remaining debris. */
-    isolatedAt: 0.7,
+    isolatedAt: 0.75,
     /** A patch counts as a "substantial concentration" when it still holds at least this many cargo units. */
     substantialUnits: 6,
     /** Maximum arrows shown by assistance at each stage. */
@@ -209,9 +211,9 @@ export const BALANCE = {
     defaultName: 'CAPTAIN',
     /** Score-table partition: scores are only ever compared inside the same region + mode. */
     region: 'coral-bay',
-    mode: 'standard',
+    mode: 'full-cleanup-boost',
     /** Bump when gameplay balance changes enough that old scores are no longer comparable. */
-    balanceVersion: '0.3.0',
+    balanceVersion: '0.3.1-boost',
   },
   hud: {
     /** The station arrow shows whenever the dock is closer than this many px to / outside the screen edge. */
@@ -268,7 +270,7 @@ export const BALANCE = {
     /** Cleanup fractions that trigger visual rewards. */
     milestones: [0.25, 0.5, 0.75],
     /** Reaching this fraction completes the v0.1 goal. */
-    completion: 0.75,
+    completion: 1,
   },
 
   station: {

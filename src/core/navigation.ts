@@ -110,6 +110,16 @@ export function metres(distancePx: number): number {
   return Math.round(distancePx / 10)
 }
 
+/** Same scale as Station, with a positive whole-metre debris readout. */
+export function debrisLabel(distancePx: number): string {
+  return `Debris ${Math.max(1, metres(distancePx))} m`
+}
+
+/** Conservative label bounds, with padding; nearer targets get first choice of space. */
+export function indicatorsOverlap(a: { x: number; y: number; width: number }, b: { x: number; y: number; width: number }): boolean {
+  return Math.abs(a.x - b.x) < (a.width + b.width) / 2 + 12 && Math.abs(a.y - b.y) < 60
+}
+
 /** Round a distance for display: exact when close, rounded to 50 m when far (and to a range when imprecise). */
 export function roundedMetres(distancePx: number, step = 1): number {
   const m = distancePx / 10

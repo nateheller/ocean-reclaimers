@@ -148,6 +148,8 @@ function readCompletion(raw: unknown): Completion | null {
     finalScore: Math.floor(raw.finalScore),
     bestChain: nonNeg(raw.bestChain) ? Math.floor(raw.bestChain) : 0,
     entry: raw.entry as Completion['entry'],
+    ...(raw.goal === 1 ? { goal: 1 as const } : {}),
+    ...(raw.rules === 'boost' ? { rules: 'boost' as const } : {}),
   }
 }
 

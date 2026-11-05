@@ -6,6 +6,8 @@ export { noUpgrades, UPGRADE_IDS }
 export type { UpgradeLevels }
 
 export interface VesselStats {
+  readonly boostDuration: number
+  readonly boostCooldown: number
   readonly capacity: number
   readonly engineMult: number
   readonly maxSpeed: number
@@ -20,6 +22,8 @@ export function vesselStats(levels: Readonly<UpgradeLevels>): VesselStats {
   const engineMult = 1 + levels.engine * U.engine.perLevel
   const widthMult = 1 + levels.width * U.width.perLevel
   return {
+    boostDuration: U.boostReserve.duration[levels.boostReserve],
+    boostCooldown: U.boostRecovery.cooldown[levels.boostRecovery],
     capacity: BALANCE.cargo.startCapacity + levels.cargo * U.cargo.perLevel,
     engineMult,
     maxSpeed: BALANCE.boat.maxSpeed * engineMult,

@@ -32,7 +32,7 @@ These instructions apply throughout this repository. Ocean Reclaimers v0.3 is a 
 - Collect whole items only; never duplicate debris removal, cargo, credits, or progress.
 - Player pickups earn cleanup progress and arcade/combo score; credits arrive on delivery.
 - Tenders transport existing cargo, without new cleanup progress or arcade score. Trawlers collect for cleanup progress and delivery credits, without arcade/combo score; preserve their courtesy behavior around the player.
-- Completion is captured once at 75% cleanup. Preserve the active-play clock rules: docking counts, while paused/title/completion screens do not.
+- New runs capture completion once at 100% cleanup; 75% unlocks full free assistance. Already-completed legacy saves keep their frozen results. Preserve the active-play clock rules: docking counts, while paused/title/completion screens do not.
 - Preserve sonar, free late-game assistance, navigation, milestones, upgrades, minimap, local scores, and continued sailing unless explicitly asked to change them.
 
 ## Saved-game compatibility
@@ -40,6 +40,8 @@ These instructions apply throughout this repository. Ocean Reclaimers v0.3 is a 
 - `src/core/save.ts` writes format version 3 and accepts versions 1, 2, and 3. The expedition key remains `oceanreclaimers.save.v1` despite the format version.
 - Scores use `oceanreclaimers.scores.v1`; mute settings use `oceanreclaimers.settings.v1`. New Game clears the expedition and preserves scores.
 - Preserve v1 boolean-upgrade migration and v2 fleet migration. Legacy completed runs lack a captured completion time and must not become new leaderboard submissions.
+- New completion records add optional `goal: 1` within save format v3. Missing goal identifies historical 75% results. Keep `coral-bay:standard` (75%), `coral-bay:full-cleanup` (original 100%), and `coral-bay:full-cleanup-boost` results separate. Optional completion `rules: "boost"` identifies the new handling rules; old pending submissions must retain their category. Never reset completed legacy runs or rewrite their frozen results.
+- Boost remains a Space-triggered timed burst. Reserve/Recovery levels default to zero in old saves. Capture duration and cooldown at activation; purchases affect the next cycle. Preserve boost-ready-on-load and existing hotkeys 1-8 (Reserve 9, Recovery 0).
 - Preserve mid-delivery cargo and credit accounting, run IDs, and duplicate score submission protection.
 - Saves are tied to `WORLD.seed` and generated debris IDs. World generation, seed, item identity, capacity, and upgrade changes can affect compatibility even without a schema change; assess migrations and regression coverage before changing them.
 - Validate untrusted storage data and handle storage failures. For persistence changes, extend relevant migration, round-trip, corruption, and delivery tests.

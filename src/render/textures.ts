@@ -556,43 +556,60 @@ function buildDecor(scene: Phaser.Scene): void {
     g.restore()
   })
 
-  const palette = [
-    ['#ff7aa8', '#ffb0cc'],
-    ['#ff9b54', '#ffd08a'],
-    ['#b07cff', '#dcc2ff'],
-    ['#ff6a6a', '#ffaaa0'],
-    ['#4ee6b0', '#b5ffe3'],
-    ['#ffd23f', '#fff0a0'],
-  ]
+  // Matte seabed vignettes retain the six original keys and 72px footprints.
   for (let v = 0; v < 6; v++) {
     const rng = new Rng(500 + v)
-    mk(scene, `coral_${v}`, 72, 72, (g) => {
+    mk(scene, 'coral_' + v, 72, 72, (g) => {
       g.save(); g.translate(36, 36)
-      const [dark, light] = palette[v]
-      if (v % 3 === 0) {
-        // brain / round coral
-        for (let i = 0; i < 5; i++) {
-          const a = rng.range(0, Math.PI * 2); const d = rng.range(0, 14)
-          const r = rng.range(8, 14)
-          const grad = g.createRadialGradient(Math.cos(a) * d - 2, Math.sin(a) * d - 2, 1, Math.cos(a) * d, Math.sin(a) * d, r)
-          grad.addColorStop(0, light); grad.addColorStop(1, dark)
-          g.fillStyle = grad; g.beginPath(); g.arc(Math.cos(a) * d, Math.sin(a) * d, r, 0, Math.PI * 2); g.fill()
+      // Preserve the original texture-local random budget; placement is untouched.
+      const variation = Array.from({ length: v % 3 === 0 ? 15 : 14 }, () => rng.next())
+      const stone = (x: number, y: number, r: number, phase: number) => {
+        const shade = g.createRadialGradient(x, y + 3, r * 0.3, x, y + 3, r * 1.45)
+        shade.addColorStop(0, 'rgba(31,86,93,0.22)'); shade.addColorStop(1, 'rgba(31,86,93,0)')
+        g.fillStyle = shade; g.beginPath(); g.ellipse(x, y + 3, r * 1.45, r * 1.05, 0, 0, Math.PI * 2); g.fill()
+        g.beginPath()
+        for (let j = 0; j < 9; j++) {
+          const a = j / 9 * Math.PI * 2
+          const d = r * (0.88 + 0.12 * Math.sin(j * 2.1 + phase))
+          const px = x + Math.cos(a) * d; const py = y + Math.sin(a) * d * 0.76
+          if (j === 0) g.moveTo(px, py); else g.lineTo(px, py)
         }
-      } else {
-        // branching coral
-        g.lineCap = 'round'
-        for (let b = 0; b < 7; b++) {
-          const a = (b / 7) * Math.PI * 2 + rng.range(-0.2, 0.2)
-          const len = rng.range(16, 28)
-          const mx = Math.cos(a) * len * 0.55; const my = Math.sin(a) * len * 0.55
-          const ex = Math.cos(a) * len; const ey = Math.sin(a) * len
-          g.strokeStyle = dark; g.lineWidth = 6
-          g.beginPath(); g.moveTo(0, 0); g.lineTo(mx, my); g.lineTo(ex, ey); g.stroke()
-          g.strokeStyle = light; g.lineWidth = 2.6
-          g.beginPath(); g.moveTo(0, 0); g.lineTo(mx, my); g.lineTo(ex, ey); g.stroke()
-          g.fillStyle = light; g.beginPath(); g.arc(ex, ey, 3.4, 0, Math.PI * 2); g.fill()
+        g.closePath()
+        const grad = g.createLinearGradient(x - r, y - r, x + r, y + r)
+        grad.addColorStop(0, '#78989b'); grad.addColorStop(1, '#4e7782')
+        g.fillStyle = grad; g.fill()
+        g.fillStyle = 'rgba(89,143,113,0.65)'
+        g.beginPath(); g.moveTo(x - r * 0.7, y - r * 0.2)
+        g.bezierCurveTo(x - r * 0.6, y - r * 0.7, x + r * 0.35, y - r * 0.65, x + r * 0.6, y - r * 0.25)
+        g.bezierCurveTo(x + r * 0.2, y - r * 0.1, x, y - r * 0.35, x - r * 0.25, y)
+        g.quadraticCurveTo(x - r * 0.5, y + r * 0.12, x - r * 0.7, y - r * 0.2); g.fill()
+      }
+      // Curved plants emerge behind rock bases instead of floating alone.
+      const baseX = v % 2 === 0 ? 9 : -9
+      if (v !== 2) {
+        for (let b = 0; b < 6; b++) {
+          const x = baseX - 6 + b * 2.5
+          const bend = (variation[b] - 0.5) * 23
+          const tip = -10 - variation[b + 3] * 15
+          g.fillStyle = b % 2 ? '#508f7a' : '#387e73'
+          g.beginPath(); g.moveTo(x - 1.5, 12)
+          g.bezierCurveTo(x - 4, 3, x + bend - 4, tip + 7, x + bend, tip)
+          g.bezierCurveTo(x + bend - 1, tip + 10, x + 2, 6, x + 1.5, 12); g.fill()
         }
       }
+      stone(-7, 10, 14 + variation[10] * 3, v)
+      stone(13, 17, 7 + variation[11] * 3, v + 2)
+      if (v === 2 || v === 5) stone(-20, 19, 6, v + 4)
+      // One restrained lavender sponge accent among the six variants.
+      if (v === 2) {
+        for (let i = 0; i < 2; i++) {
+          const x = 9 + i * 6; const y = 8 - i * 4
+          g.fillStyle = '#857e9c'; g.beginPath(); g.ellipse(x, y, 3, 5, 0.25, 0, Math.PI * 2); g.fill()
+          g.fillStyle = '#586f83'; g.beginPath(); g.ellipse(x, y - 3, 1.8, 1, 0.25, 0, Math.PI * 2); g.fill()
+        }
+      }
+      g.globalCompositeOperation = 'source-atop'; g.fillStyle = 'rgba(42,139,148,0.13)'
+      g.fillRect(-36, -36, 72, 72)
       g.restore()
     })
   }
