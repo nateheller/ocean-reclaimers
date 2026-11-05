@@ -34,6 +34,24 @@ Requires Node 20+. `dist/` is fully static (relative base), so it can be hosted 
 
 ## Controls
 
+### Beta feedback and privacy
+
+The title screen shows **v0.3.1 Beta**. **Feedback / Report a Bug** is available on the title and pause menus and
+opens Google Forms in a separate tab through a normal link. The game does not submit anything automatically or attach
+saves, names, scores, or other player information. Progress and scores stay in this browser; they are not synchronized
+between devices, and clearing browser data may erase them. Avoid sensitive personal information in feedback.
+
+The public version label and respondent URL live in `src/config/release.ts`. Version prefilling is disabled because
+no documented Forms `entry.<id>` was supplied. Do not guess an entry ID; add prefilling only after the form owner
+provides a verified version-field mapping. No submission API or background availability check is used.
+
+If a new tab is blocked, allow new tabs or copy the feedback link address and open it manually. If Forms is unavailable,
+try again later. An invalid/missing configured URL displays an unavailable message. Cross-origin form availability
+cannot be diagnosed by the game; a failed navigation leaves the game tab intact. Historical leaderboard categories
+and saved records are unchanged.
+
+### Keyboard controls
+
 | Key | Action |
 | --- | --- |
 | `W` / `Up`, `S` / `Down` | Forward / reverse |
