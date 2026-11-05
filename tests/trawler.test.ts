@@ -54,6 +54,32 @@ const unitsInHolds = (m: GameModel) => m.trawlers.cargoUnits
 const removedUnits = (m: GameModel) => m.totalUnits - m.field.units
 
 describe('trawler upgrade rules', () => {
+  it('finishes once when a trawler collects the final isolated item while the player is docked', () => {
+    const spawns: DebrisSpawn[] = [0, 1, 2, 3].map((id) => ({
+      id, type: 'bottle', x: WORLD.dock.x + 200 + id * 40, y: WORLD.dock.y,
+      rot: 0, patch: `last${id}`, zone: 'harbor',
+    }))
+    const m = trawlerModel(1, 0, spawns)
+    for (const id of [0, 1, 2]) expect(m.collect(id, id).ok).toBe(true)
+    expect(m.progress).toBe(0.75)
+    expect(m.completed).toBe(false)
+    const score = m.score
+    let completions = 0
+    m.listen((e) => { if (e.type === 'completed') completions++ })
+    for (let t = 0; t < 120 && !m.completed; t += DT) {
+      m.advanceClock(DT) // Same clock path as docked play; no player pickups.
+      m.updateTrawlers(DT)
+    }
+    expect(m.progress).toBe(1)
+    expect(m.remainingCount).toBe(0)
+    expect(m.completion?.baseScore).toBe(score)
+    const completion = { ...m.completion! }
+    expect(completion.goal).toBe(1)
+    m.advanceClock(60)
+    run(m, 30)
+    expect(m.completion).toEqual(completion)
+    expect(completions).toBe(1)
+  })
   it('has the documented prices and capacities', () => {
     const T = BALANCE.upgrades.trawler
     expect(UPGRADES.trawler.maxLevel).toBe(5)

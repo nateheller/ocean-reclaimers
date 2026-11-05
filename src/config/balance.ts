@@ -183,11 +183,11 @@ export const BALANCE = {
    */
   assist: {
     /** Subtle hint toward the nearest remaining concentration. */
-    hintAt: 0.6,
+    hintAt: 0.75,
     /** Clear directional guidance toward substantial concentrations. */
-    guidanceAt: 0.65,
+    guidanceAt: 0.75,
     /** Help locating isolated remaining debris. */
-    isolatedAt: 0.7,
+    isolatedAt: 0.75,
     /** A patch counts as a "substantial concentration" when it still holds at least this many cargo units. */
     substantialUnits: 6,
     /** Maximum arrows shown by assistance at each stage. */
@@ -209,9 +209,9 @@ export const BALANCE = {
     defaultName: 'CAPTAIN',
     /** Score-table partition: scores are only ever compared inside the same region + mode. */
     region: 'coral-bay',
-    mode: 'standard',
+    mode: 'full-cleanup',
     /** Bump when gameplay balance changes enough that old scores are no longer comparable. */
-    balanceVersion: '0.3.0',
+    balanceVersion: '0.3.1',
   },
   hud: {
     /** The station arrow shows whenever the dock is closer than this many px to / outside the screen edge. */
@@ -268,7 +268,7 @@ export const BALANCE = {
     /** Cleanup fractions that trigger visual rewards. */
     milestones: [0.25, 0.5, 0.75],
     /** Reaching this fraction completes the v0.1 goal. */
-    completion: 0.75,
+    completion: 1,
   },
 
   station: {

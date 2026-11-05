@@ -3,7 +3,7 @@
  *
  *   Final Score = Base Arcade Score x Time Multiplier
  *
- * The base score is the existing collection + combo score. The time multiplier rewards finishing Coral Bay (75%
+ * The base score is the existing collection + combo score. The time multiplier rewards finishing Coral Bay (100%
  * cleaned) quickly, using *active* play time only (pauses are excluded by the caller). The bands are configurable in
  * `BALANCE.scoring` and are provisional: they are not a statistically established benchmark.
  */
@@ -49,8 +49,10 @@ export function timeBandLabel(seconds: number): string {
   return `Over ${formatTime(prev)}`
 }
 
-/** A finished expedition: captured exactly once, when 75% is first reached. */
+/** A finished expedition: captured exactly once, when 100% is first reached. */
 export interface Completion {
+  /** Missing on historical 75% results; new full-cleanup runs record 1. */
+  goal?: 1
   /** Random id of the expedition; the key that prevents duplicate leaderboard submissions. */
   runId: string
   /** Active play time when the goal was first reached (seconds, hundredths). */
@@ -67,6 +69,7 @@ export function makeCompletion(runId: string, timeSeconds: number, baseScore: nu
   const t = roundTime(timeSeconds)
   const multiplier = timeMultiplier(t)
   return {
+    goal: 1,
     runId,
     timeSeconds: t,
     baseScore,

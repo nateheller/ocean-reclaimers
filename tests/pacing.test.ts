@@ -104,7 +104,7 @@ export function simulate(
   let route: { x: number; y: number }[] = []
   let routeTimer = 0
   let routeKey = ''
-  while (t < 60 * maxMinutes && m.progress < 0.75) {
+  while (t < 60 * maxMinutes && m.progress < BALANCE.progress.completion) {
     t += dt
     if (trace && t >= nextTrace) {
       nextTrace += 30
@@ -195,7 +195,7 @@ describe('pacing with trawlers (greedy bot)', () => {
   // eslint-disable-next-line no-console
   console.log(report('with tenders + trawlers + sonar', full))
   it('still finishes, and trawlers shorten the expedition without replacing the player', () => {
-    expect(full.progress).toBeGreaterThanOrEqual(0.75)
+    expect(full.progress).toBeGreaterThanOrEqual(1)
     expect(full.model.trawlers.count).toBeLessThanOrEqual(2)
   }, 120_000)
 })
@@ -209,7 +209,7 @@ describe('pacing (greedy bot)', () => {
   it('reaches the first upgrade within a few minutes and finishes the expedition in a reasonable session', () => {
     expect(withTenders.buys.length).toBeGreaterThan(0)
     expect(withTenders.buys[0].t).toBeLessThan(240)
-    expect(withTenders.progress).toBeGreaterThanOrEqual(0.75)
+    expect(withTenders.progress).toBeGreaterThanOrEqual(1)
     expect(withTenders.t).toBeLessThan(60 * 20)
   }, 120_000)
 
@@ -278,7 +278,7 @@ describe('purchasing strategies (greedy bot)', () => {
 
   it('every strategy finishes Coral Bay, with a first upgrade inside two minutes', () => {
     for (const x of rows) {
-      expect(x.r.progress, x.name).toBeGreaterThanOrEqual(0.75)
+      expect(x.r.progress, x.name).toBeGreaterThanOrEqual(1)
       expect(x.firstUpgrade, x.name).toBeLessThan(120)
     }
   }, 300_000)

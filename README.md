@@ -10,7 +10,7 @@ A casual, top-down arcade ocean-cleanup game for **International Sibling Society
 Drive a small cleanup boat around Coral Bay, scoop up floating plastic, unload at the Reclamation Station for
 credits and grow your operation: five levels each of cargo, engine and collection arms, **Cargo Tenders** that ferry
 your catch home, **Auto Trawlers** that collect on their own, and an **Ocean Sonar** that finds the plastic for you.
-Clean 75% of the starting debris to complete the expedition, then chase a better time and score on the local
+Clean 100% of the starting debris cargo units to complete the expedition, then chase a better time and score on the local
 high-score table.
 
 **Stack:** TypeScript, Phaser 3, Vite. 2D, runs entirely in the browser. No accounts, APIs or paid services. All art
@@ -25,7 +25,7 @@ automatically (see "Saving and migration").
 ```bash
 pnpm install        # or: npm install
 pnpm dev            # dev server (PORT / HOST env vars override; default http://127.0.0.1:3000)
-pnpm test           # automated tests (vitest, 128 tests)
+pnpm test           # automated tests (vitest)
 pnpm build          # typecheck + production build into dist/
 pnpm preview        # serve dist/ at http://localhost:4173
 ```
@@ -54,10 +54,10 @@ Requires Node 20+. `dist/` is fully static (relative base), so it can be hosted 
    of the screen whenever the dock is *outside the camera view*, at any distance, and fades out when the dock is clearly
    visible (with hysteresis, so it does not flicker at the edge). It is hidden only once you are in docking range.
 3. **Ocean Sonar** (upgrade, 5 levels). Progressively better debris detection - see below.
-4. **Free late-game assistance.** From 60% cleaned the game quietly helps you find what is left, with or without sonar.
+4. **Free late-game assistance.** From 75% cleaned, full assistance helps you find what is left, with or without sonar.
 5. **Auto Trawlers** (upgrade, up to two). Small unmanned vessels that sail out, scoop plastic, bring it home and go
    again. They are visually distinct from tenders and have compact status chips (`A1 Collecting 4/10`).
-6. **Completion-time scoring.** At the first moment 75% is reached the expedition is *finalised*:
+6. **Completion-time scoring.** At the first moment 100% is reached the expedition is *finalised*:
    `Final score = base arcade score x time multiplier`.
 7. **Local high-score table** (top 10), name entry, personal bests, and a rebuilt completion screen.
 8. **Save format v3** with automatic migration from v1 and v2 saves. High scores live under a separate key.
@@ -137,9 +137,14 @@ Independent of sonar purchases (all thresholds in `BALANCE.assist`):
 
 | Cleaned | Help |
 | ---: | --- |
-| 60% | Subtle, faint arrow to the nearest remaining concentration |
-| 65% | Clear arrows toward substantial concentrations (6+ units) |
-| 70% | Isolated remaining items are shown on the minimap and pointed to |
+| Below 75% | No free debris arrows or debris minimap markers; purchased sonar provides earlier assistance |
+| 75% onward | Full assistance: up to three whole-bay arrows, concentration markers and individual remaining items on the minimap, including small isolated remnants |
+| 100% | No debris indicators once no debris remains |
+
+All three free-assistance thresholds are 75%, activating the full existing profile together. Purchased sonar keeps
+its existing ranges and capabilities at every level, and remains useful before expedition completion. At 75%, a positive milestone notification announces full assistance; play continues toward 100%. After completion,
+**Keep Sailing** remains available for sailing and delivering remaining cargo. Saving and reloading preserves
+sonar upgrades and cleanup progress; assistance is recalculated from that progress.
 
 Sonar and assistance are merged taking the better of each property, so buying sonar never makes the late game worse,
 and Coral Bay never ends with minutes of aimless searching.
@@ -161,7 +166,7 @@ available to you for combo score: the best result balances both.
 
 The completion time is the **active play clock**: paused time and the title / completion screens are excluded.
 The dock menu does *not* stop the clock, because tenders and trawlers keep working while it is open (stopping it would be
-exploitable). The clock is captured **once**, at the first moment 75% is reached; later sailing never changes the
+exploitable). The clock is captured **once**, at the first moment 100% is reached; later sailing never changes the
 recorded result.
 
 | Completion time | Multiplier |
@@ -184,9 +189,19 @@ are offered. If the score makes the top 10 you can enter a name (12 characters m
 trimmed, upper-cased and restricted to safe characters; comparisons for **personal bests** use the same normalised
 name. Beating your best shows *NEW PERSONAL BEST!* with previous / new / improvement. One expedition can be recorded only
 once (its `runId` is remembered), even if you keep sailing, reload, or submit twice. Entries store: name, region
-(`coral-bay`), mode (`standard`), final and base score, time, multiplier, best combo, map seed, balance version and
+(`coral-bay`), mode (`full-cleanup` for new runs), final and base score, time, multiplier, best combo, map seed, balance version and
 date, and boards are keyed by region + mode, so future challenge modes will not be mixed with standard runs.
 Records live under `oceanreclaimers.scores.v1`, separate from the expedition save, so **New Game never erases scores**.
+
+New 100% cleanup scores have their own board and personal bests. The **Historical 75% Scores** button keeps the old
+`standard` board accessible; records are not moved or deleted. Old pending results still submit to that historical
+board. Already-completed saves keep their original frozen score/time and Keep Sailing behavior; unfinished saves
+adopt the 100% goal. Save format remains v3: only new completion records add optional `goal: 1` to identify full cleanup.
+
+Debris direction arrows use the same geometry and 10-pixels-per-metre distance scale as the yellow station arrow,
+with teal/sea-green styling and positive labels such as **Debris 150 m**. Labels update as the boat moves. Overlapping
+indicators are suppressed with station priority, then nearest debris first; sonar detection ranges and target selection
+are unchanged. Low-level sonar still locates concentrations rather than exact individual items.
 
 ### Upgrade prices
 
@@ -203,13 +218,16 @@ Records live under `oceanreclaimers.scores.v1`, separate from the expedition sav
 
 Second Tender 60, Second Trawler 70. The tender is offered after 3 station visits so you feel the chore first.
 
-## Economy and pacing results (automated bot - not human playtesting)
+## Historical v0.3 economy and pacing results (75% goal; automated bot, not human playtesting)
 
 `tests/pacing.test.ts` plays Coral Bay headlessly with a greedy bot (steering noise, follows the real navigation grid,
 buys upgrades, calls tenders). It prints these tables when the suite runs. **The bot knows where every item is, never
 gets lost and is roughly twice as fast as the human v0.2 tester (about 6 minutes), so absolute times are optimistic.**
 It cannot value sonar (it never searches), so sonar looks like pure cost to it. Use the numbers only to spot obvious
 problems.
+
+**The tables below describe the old 75% victory condition, not current 100% runs.** Current pacing tests require
+every strategy to reach 100%; time bands remain provisional and unchanged pending human playtesting.
 
 Five purchasing strategies, one run each (minutes; skill 0.85):
 
@@ -315,7 +333,7 @@ incomparable.
 * Keyboard only. No touch or gamepad controls.
 * Art is procedural and intentionally simple; wildlife is not skeletally animated.
 * Desktop browsers only; on slow GPUs the internal resolution drops automatically.
-* Debris is fixed per seed and does not respawn. After 75% you can keep sailing to clean the rest, but the scored
+* Debris is fixed per seed and does not respawn. After 100% you can keep sailing and deliver held cargo, but the scored
   result is already locked.
 * Boat collision uses circles, so shorelines are slightly forgiving. Tenders and trawlers use a coarse 40 px grid and
   may take wide turns near tight reef gaps; if blocked for too long they are relocated to safe water with cargo intact.

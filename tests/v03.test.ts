@@ -9,11 +9,12 @@ import {
   normalizeName,
   personalBest,
   rankFor,
+  STANDARD_BOARD, HISTORICAL_BOARD, completionBoard,
   submitScore,
   topScores,
 } from '../src/core/leaderboard'
 import { GameModel } from '../src/core/model'
-import { edgeIndicator, worldToScreen, type Insets } from '../src/core/navigation'
+import { debrisLabel, indicatorsOverlap, edgeIndicator, worldToScreen, type Insets } from '../src/core/navigation'
 import { buildSave, loadSave, MemoryStorage, parseSave, writeSave, type StorageLike } from '../src/core/save'
 import { finalScore, formatTime, makeCompletion, roundTime, timeBandLabel, timeMultiplier } from '../src/core/scoring'
 import {
@@ -77,7 +78,7 @@ describe('completion scoring', () => {
     expect(c.entry).toBe('pending')
   })
 
-  it('captures the completion exactly once, at the moment 75% is reached, and keeps it afterwards', () => {
+  it('captures the completion exactly once, at the moment 100% is reached, and keeps it afterwards', () => {
     const spawns = [spawn(0, 'bottle'), spawn(1, 'bottle'), spawn(2, 'bottle'), spawn(3, 'bottle')]
     const m = new GameModel(spawns)
     m.tick(0, 10)
@@ -86,6 +87,9 @@ describe('completion scoring', () => {
     expect(m.completion).toBeNull()
     m.collect(2, 0.2)
     expect(m.progress).toBeCloseTo(0.75)
+    expect(m.completion).toBeNull()
+    m.collect(3, 0.3)
+    expect(m.progress).toBe(1)
     expect(m.completion).not.toBeNull()
     const first = { ...m.completion! }
     expect(first.timeSeconds).toBe(10)
@@ -114,6 +118,7 @@ describe('completion scoring', () => {
 // ---------------------------------------------------------------------------------------------------------------
 describe('local leaderboard', () => {
   const completion = (id: string, score: number, time = 300) => ({
+    goal: 1 as const,
     ...makeCompletion(id, time, score, 3),
     baseScore: score,
     multiplier: 1,
@@ -212,6 +217,20 @@ describe('local leaderboard', () => {
 
 // ---------------------------------------------------------------------------------------------------------------
 describe('screen-edge navigation', () => {
+  it('formats positive debris distances using station metres and responds to movement', () => {
+    expect(debrisLabel(1500)).toBe('Debris 150 m')
+    expect(debrisLabel(1494)).toBe('Debris 149 m')
+    expect(debrisLabel(0)).toBe('Debris 1 m')
+    expect(debrisLabel(4)).toBe('Debris 1 m')
+    expect(debrisLabel(Math.hypot(300, 400))).toBe('Debris 50 m')
+  })
+
+  it('reserves label space for station and nearer targets without hiding separated arrows', () => {
+    const station = { x: 100, y: 100, width: 140 }
+    expect(indicatorsOverlap({ x: 180, y: 110, width: 130 }, station)).toBe(true)
+    expect(indicatorsOverlap({ x: 400, y: 110, width: 130 }, station)).toBe(false)
+    expect(indicatorsOverlap({ x: 100, y: 170, width: 130 }, station)).toBe(false)
+  })
   const view = { x: 1000, y: 1000, width: 1000, height: 600 }
   const screen = { width: 1000, height: 600 }
   const insets: Insets = { top: 100, right: 50, bottom: 150, left: 50 }
@@ -314,11 +333,20 @@ describe('sonar and late-game assistance', () => {
     expect(profiles[0].minimapRange).toBe(0)
   })
 
-  it('stages the free assistance by progress, without needing sonar', () => {
-    expect(assistStage(0.3)).toBe(0)
-    expect(assistStage(BALANCE.assist.hintAt)).toBe(1)
-    expect(assistStage(BALANCE.assist.guidanceAt)).toBe(2)
-    expect(assistStage(BALANCE.assist.isolatedAt)).toBe(3)
+  it('activates full free assistance at 75%, preserving the threshold tolerance', () => {
+    const field = new DebrisField(generateDebris())
+    for (const progress of [0, 0.3, 0.6, 0.65, 0.7, 0.72, 0.75 - 2e-9]) {
+      expect(assistStage(progress)).toBe(0)
+      expect(sensorProfile(0, progress)).toBe(NO_SENSORS)
+      expect(readSensors(field, sensorProfile(0, progress), { x: 500, y: 3000 })).toEqual({ arrows: [], minimap: [] })
+    }
+    for (const threshold of [BALANCE.assist.hintAt, BALANCE.assist.guidanceAt, BALANCE.assist.isolatedAt]) {
+      expect(threshold).toBe(0.75)
+    }
+    for (const progress of [0.75 - 5e-10, 0.75, 0.9, 1]) {
+      expect(assistStage(progress)).toBe(3)
+      expect(sensorProfile(0, progress)).toEqual(assistProfile(3))
+    }
     expect(assistProfile(0)).toBe(NO_SENSORS)
     expect(assistProfile(1).subtle).toBe(true)
     expect(assistProfile(3).minimapItems).toBe(true)
@@ -331,6 +359,73 @@ describe('sonar and late-game assistance', () => {
     expect(merged.arrowRange).toBeGreaterThanOrEqual(sonar.arrowRange)
     expect(merged.precision).toBeGreaterThanOrEqual(sonar.precision)
     expect(mergeProfiles(sonar, NO_SENSORS)).toBe(sonar)
+  })
+
+  it.each([1, 2, 3, 4, 5])('keeps level %i sonar useful and unchanged before 75%', (level) => {
+    const profile = sonarProfile(level)
+    expect(profile.arrows).toBe([0, 1, 3, 3, 4, 4][level])
+    expect(profile.arrowRange).toBe([0, 1000, 1700, 2400, 99999, 99999][level])
+    expect(profile.minimapRange).toBe([0, 0, 0, 1900, 99999, 99999][level])
+    expect(profile.minimapItems).toBe(level === 5)
+    expect(profile.arrowMinUnits).toBe(level === 5 ? 1 : 6)
+    const boat = { x: 0, y: 0 }
+    const field = new DebrisField([
+      spawn(0, 'net', 500, 0, 'near'), spawn(1, 'container', 500, 0, 'near'),
+      spawn(2, 'bottle', 100, 0, 'isolated'),
+      spawn(3, 'net', profile.arrowRange + 1, 0, 'outside'),
+      spawn(4, 'container', profile.arrowRange + 1, 0, 'outside'),
+    ])
+    for (const progress of [0, 0.6, 0.65, 0.7, 0.75 - 2e-9]) {
+      expect(sensorProfile(level, progress)).toEqual(profile)
+      const reading = readSensors(field, sensorProfile(level, progress), boat)
+      expect(reading.arrows.map((m) => m.key)).toEqual(level === 5 ? ['isolated', 'near'] : ['near'])
+      expect(reading.minimap.filter((m) => m.kind === 'cluster').map((m) => m.key))
+        .toEqual(level >= 3 ? ['isolated', 'near'] : [])
+      expect(reading.minimap.filter((m) => m.kind === 'item')).toHaveLength(level === 5 ? 5 : 0)
+    }
+  })
+
+  it.each([0, 1, 2, 3, 4, 5])('preserves completion and sensor readings through save/reload with sonar %i', (level) => {
+    // Four one-unit items give exact 0%, 25%, 50%, 75%, and 100% boundaries.
+    const spawns = [0, 1, 2, 3].map((id) => spawn(id, 'bottle', 100 + id * 800, 100, `patch${id}`))
+    const model = new GameModel(spawns)
+    model.credits = 10_000
+    for (let i = 0; i < level; i++) expect(model.buy('sonar').ok).toBe(true)
+    const boat = { x: 100, y: 100, heading: 0 }
+    let completion: typeof model.completion = null
+    for (let removed = 0; removed <= spawns.length; removed++) {
+      if (removed > 0) expect(model.collect(removed - 1, removed).ok).toBe(true)
+      expect(model.progress).toBe(removed / 4)
+      const reading = model.readSensors(boat)
+      if (removed < 4) {
+        expect(model.completed).toBe(false)
+        expect(model.completion).toBeNull()
+        if (level === 0 && removed < 3) expect(reading).toEqual({ arrows: [], minimap: [] })
+        if (removed === 3) {
+          expect(reading.arrows.map((m) => m.key)).toEqual(['patch3'])
+          expect(reading.minimap.filter((m) => m.kind === 'item').map((m) => m.key)).toEqual(['i3'])
+        }
+      } else {
+        expect(model.completed).toBe(true)
+        expect(model.completion).not.toBeNull()
+        completion = { ...model.completion! }
+        expect(reading).toEqual({ arrows: [], minimap: [] })
+        model.advanceClock(5)
+        expect(model.completion).toEqual(completion)
+      }
+      const storage = new MemoryStorage()
+      expect(writeSave(storage, buildSave(model, boat))).toBe(true)
+      const loaded = loadSave(storage, new Set(spawns.map((s) => s.id)))!
+      expect(loaded.version).toBe(3)
+      const restored = new GameModel(spawns)
+      restored.restore(loaded.model)
+      expect(restored.progress).toBe(model.progress)
+      expect(restored.upgrades).toEqual(model.upgrades)
+      expect(restored.completed).toBe(model.completed)
+      expect(restored.completion).toEqual(model.completion)
+      expect(restored.sensors).toEqual(model.sensors)
+      expect(restored.readSensors(boat)).toEqual(reading)
+    }
   })
 
   it('only ever marks debris that is still in the water, nearest first, within the arrow budget', () => {
@@ -365,7 +460,7 @@ describe('sonar and late-game assistance', () => {
     // Leave the final 3% of items scattered across the map.
     const keep = new Set(all.filter((_, i) => i % Math.ceil(all.length / 8) === 0).map((s) => s.id))
     for (const s of all) if (!keep.has(s.id)) f.remove(s.id)
-    const profile = sensorProfile(0, 0.72)
+    const profile = sensorProfile(0, 0.75)
     expect(profile.source).toBe('assist')
     const reading = readSensors(f, profile, { x: 400, y: 400 })
     expect(reading.arrows.length).toBeGreaterThan(0)
@@ -386,6 +481,47 @@ describe('sonar and late-game assistance', () => {
 // ---------------------------------------------------------------------------------------------------------------
 describe('save format v3', () => {
   const boat = { x: 800, y: 2900, heading: 1.1 }
+
+  it('keeps historical completed saves and pending scores separate from full-cleanup results', () => {
+    const m = new GameModel(generateDebris())
+    const legacy = JSON.parse(JSON.stringify(buildSave(m, boat)))
+    legacy.model.completed = true
+    legacy.model.completion = { runId: m.runId, timeSeconds: 123, baseScore: 400, finalScore: 600, multiplier: 1.5, bestChain: 3, entry: 'pending' }
+    const parsed = parseSave(JSON.stringify(legacy))!
+    const restored = new GameModel(generateDebris())
+    restored.restore(parsed.model)
+    expect(restored.completed).toBe(true)
+    expect(restored.completion).toEqual(legacy.model.completion)
+    expect(completionBoard(restored.completion!)).toEqual(HISTORICAL_BOARD)
+    const storage = new MemoryStorage()
+    const old = restored.completion!
+    expect(submitScore(storage, { completion: old, name: 'OLD' }).ok).toBe(true)
+    const historicalBefore = topScores(loadScores(storage), HISTORICAL_BOARD)
+    expect(topScores(loadScores(storage), STANDARD_BOARD)).toEqual([])
+    const full = makeCompletion('new-full-run', 500, 900, 4)
+    expect(submitScore(storage, { completion: full, name: 'NEW' }).ok).toBe(true)
+    expect(topScores(loadScores(storage), HISTORICAL_BOARD)).toEqual(historicalBefore)
+    expect(topScores(loadScores(storage), STANDARD_BOARD).map((e) => e.id)).toEqual(['new-full-run'])
+    expect(submitScore(storage, { completion: old, name: 'OLD' })).toEqual({ ok: false, reason: 'duplicate' })
+    expect(writeSave(storage, buildSave(restored, boat))).toBe(true)
+    expect(loadSave(storage)!.model.completion).toEqual(old)
+  })
+
+  it('applies the full-cleanup goal to unfinished legacy saves without changing upgrades or debris', () => {
+    const spawns = [0, 1, 2, 3].map((id) => spawn(id, 'bottle'))
+    const m = new GameModel(spawns)
+    m.collect(0, 0)
+    const raw = JSON.parse(JSON.stringify(buildSave(m, boat)))
+    const restored = new GameModel(spawns)
+    restored.restore(parseSave(JSON.stringify(raw))!.model)
+    expect(restored.upgrades).toEqual(m.upgrades)
+    restored.collect(1, 1)
+    restored.collect(2, 2)
+    expect(restored.progress).toBe(0.75)
+    expect(restored.completed).toBe(false)
+    restored.collect(3, 3)
+    expect(restored.completion?.goal).toBe(1)
+  })
 
   it('round-trips trawlers, the run id, stats and a pending completion', () => {
     const m = new GameModel(generateDebris())

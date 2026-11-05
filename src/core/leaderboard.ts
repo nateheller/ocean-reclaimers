@@ -52,6 +52,8 @@ export interface BoardRef {
 }
 
 export const STANDARD_BOARD: BoardRef = { region: BALANCE.scoring.region, mode: BALANCE.scoring.mode }
+export const HISTORICAL_BOARD: BoardRef = { region: BALANCE.scoring.region, mode: 'standard' }
+export const completionBoard = (completion: Completion): BoardRef => completion.goal === 1 ? STANDARD_BOARD : HISTORICAL_BOARD
 
 export const boardKey = (b: BoardRef = STANDARD_BOARD): string => `${b.region}:${b.mode}`
 
@@ -92,7 +94,7 @@ function readEntry(raw: unknown): ScoreEntry | null {
     id: raw.id.slice(0, 64),
     name: normalizeName(raw.name),
     region: typeof raw.region === 'string' ? raw.region : STANDARD_BOARD.region,
-    mode: typeof raw.mode === 'string' ? raw.mode : STANDARD_BOARD.mode,
+    mode: typeof raw.mode === 'string' ? raw.mode : HISTORICAL_BOARD.mode,
     finalScore: Math.floor(raw.finalScore),
     baseScore: isNum(raw.baseScore) ? Math.floor(raw.baseScore) : Math.floor(raw.finalScore),
     timeSeconds: raw.timeSeconds,
@@ -215,7 +217,7 @@ export interface SubmitInput {
  * save) is rejected with 'duplicate' and changes nothing.
  */
 export function submitScore(storage: StorageLike, input: SubmitInput): SubmitResult {
-  const board = input.board ?? STANDARD_BOARD
+  const board = input.board ?? completionBoard(input.completion)
   const store = loadScores(storage)
   const c = input.completion
   if (alreadySubmitted(store, c.runId)) return { ok: false, reason: 'duplicate' }
@@ -234,7 +236,7 @@ export function submitScore(storage: StorageLike, input: SubmitInput): SubmitRes
     multiplier: c.multiplier,
     bestChain: c.bestChain,
     seed: WORLD.seed,
-    balanceVersion: input.balanceVersion ?? BALANCE.scoring.balanceVersion,
+    balanceVersion: input.balanceVersion ?? (c.goal === 1 ? BALANCE.scoring.balanceVersion : '0.3.0'),
     date: (input.now ?? new Date()).toISOString(),
   }
   const key = boardKey(board)

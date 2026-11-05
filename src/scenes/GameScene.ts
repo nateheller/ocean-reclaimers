@@ -22,11 +22,10 @@ import {
   stepBoat,
   type BoatState,
 } from '../core/boat'
-import { alreadySubmitted, loadScores, markSubmitted, rankFor, STANDARD_BOARD, submitScore, topScores } from '../core/leaderboard'
+import { alreadySubmitted, loadScores, markSubmitted, rankFor, completionBoard, HISTORICAL_BOARD, STANDARD_BOARD, submitScore, topScores } from '../core/leaderboard'
 import { GameModel } from '../core/model'
-import { edgeIndicator, metres, type ViewRect } from '../core/navigation'
+import { debrisLabel, indicatorsOverlap, edgeIndicator, metres, type ViewRect } from '../core/navigation'
 import { timeBandLabel } from '../core/scoring'
-import { distanceLabel } from '../core/sensors'
 import { TRAWLER_STATUS_LABEL, type TrawlerEvent } from '../core/trawler'
 import { Rng, hashSeed } from '../core/rng'
 import { buildSave, clearSave, loadSave, loadSettings, writeSave, writeSettings } from '../core/save'
@@ -68,7 +67,7 @@ const SEABED_ALPHA = [0.4, 0.6, 0.85, 1]
 const MILESTONE_TEXT: Record<number, { title: string; sub: string }> = {
   0.25: { title: '25% cleaned', sub: 'The water is clearing and fish are returning' },
   0.5: { title: '50% cleaned', sub: 'Coral colors glow again - turtles and dolphins join in' },
-  0.75: { title: '75% cleaned!', sub: 'Coral Bay sparkles - a manta ray and a whale have arrived' },
+  0.75: { title: '75% cleaned - great work!', sub: 'Full debris assistance unlocked - find the last remnants!' },
 }
 
 export class GameScene extends Phaser.Scene {
@@ -121,7 +120,7 @@ export class GameScene extends Phaser.Scene {
   private upgradeHinted = false
   private tenderView!: TenderView
   private trawlerView!: TrawlerView
-  /** Counts down (in playing time) to showing the completion panel after the 75% celebration. */
+  /** Counts down (in playing time) to showing the completion panel after the completion celebration. */
   private pendingWinTimer = 0
   private homeShown = false
   private readonly arrowShown = new Map<string, boolean>()
@@ -457,7 +456,10 @@ export class GameScene extends Phaser.Scene {
     this.ui.setHudVisible(true)
     this.stationLabel.setVisible(true)
     if (continueSave) this.movedOnce = true
-    if (continueSave && this.model.completion?.entry === 'pending') this.pendingWinTimer = 1.4
+    if (continueSave && this.model.completion?.entry === 'pending') {
+      this.winShown = true
+      this.pendingWinTimer = 1.4
+    }
     this.mode = 'playing'
     this.input_.flush()
     this.audio.play('dock')
@@ -990,13 +992,8 @@ export class GameScene extends Phaser.Scene {
     const cam = this.cameras.main
     this.sparkle.explode(46, cam.midPoint.x, cam.midPoint.y)
     this.sparkle.explode(30, this.boat.x, this.boat.y)
-    cam.flash(300, 200, 255, 245, true)
-    if (m >= BALANCE.progress.completion && !this.winShown) {
-      this.winShown = true
-      // Give the celebration a moment, then show the result. The countdown only runs while playing, so it never
-      // opens over the shop or the pause menu.
-      this.pendingWinTimer = 3.2
-    }
+    if (m !== 0.75) cam.flash(300, 200, 255, 245, true)
+
     this.saveNow()
   }
 
@@ -1006,10 +1003,10 @@ export class GameScene extends Phaser.Scene {
 
   private showCompletion(): void {
     const c = this.model.completion
-    if (!c || this.mode !== 'playing') return
+    if (!c || (this.mode !== 'playing' && this.mode !== 'docked')) return
     const store = loadScores(this.storage)
-    const { rank, qualifies } = rankFor(store, c.finalScore)
-    const board = topScores(store)
+    const { rank, qualifies } = rankFor(store, c.finalScore, completionBoard(c))
+    const board = topScores(store, completionBoard(c))
     const size = BALANCE.scoring.leaderboardSize
     const duplicate = alreadySubmitted(store, c.runId)
     const canEnter = c.entry === 'pending' && qualifies && !duplicate
@@ -1019,10 +1016,12 @@ export class GameScene extends Phaser.Scene {
       markSubmitted(this.storage, c.runId)
       this.saveNow()
     }
+    this.ui.hideDock()
     this.mode = 'win'
     this.ui.setPrompt(null)
     this.ui.minimap.setExpanded(false)
     this.ui.showWin({
+      goal: c.goal === 1 ? 100 : 75,
       timeSeconds: c.timeSeconds,
       bandLabel: timeBandLabel(c.timeSeconds),
       baseScore: c.baseScore,
@@ -1056,7 +1055,7 @@ export class GameScene extends Phaser.Scene {
         improvement: res.improvement,
         entries: res.entries,
       })
-      this.showScores(res.entry.id)
+      this.showScores(res.entry.id, c.goal !== 1)
     } else if (res.reason === 'duplicate') {
       c.entry = 'saved'
       this.ui.showScoreError('This expedition is already on the leaderboard.')
@@ -1075,14 +1074,19 @@ export class GameScene extends Phaser.Scene {
     const typed = this.ui.currentName()
     if (typed === null) return
     const store = loadScores(this.storage)
-    if (!rankFor(store, c.finalScore).qualifies) return
+    if (!rankFor(store, c.finalScore, completionBoard(c)).qualifies) return
     submitScore(this.storage, { completion: c, name: typed || store.lastName || 'CAPTAIN' })
     c.entry = 'saved'
   }
 
-  private showScores(highlightId: string | null): void {
+  private showScores(highlightId: string | null, historical = false): void {
     const store = loadScores(this.storage)
-    this.ui.showScores({ title: 'Coral Bay \u2013 Standard run', entries: topScores(store, STANDARD_BOARD), highlightId })
+    this.ui.showScores({
+      title: historical ? 'Coral Bay - Historical 75% runs' : 'Coral Bay - 100% cleanup',
+      entries: topScores(store, historical ? HISTORICAL_BOARD : STANDARD_BOARD), highlightId,
+      alternateLabel: historical ? '100% Cleanup Scores' : 'Historical 75% Scores',
+      onAlternate: () => this.showScores(null, !historical),
+    })
   }
 
   private setClarity(level: number): void {
@@ -1227,7 +1231,16 @@ export class GameScene extends Phaser.Scene {
       }
       this.runFleet(dt)
       this.runTrawlers(dt)
-      if (this.pendingWinTimer > 0 && this.mode === 'playing') {
+      if (this.model.completion && !this.winShown) {
+        this.winShown = true
+        this.pendingWinTimer = 3.2
+        this.ui.toast('100% cleaned!', 'Every piece recovered - Coral Bay is complete!', 'milestone')
+        this.audio.play('milestone')
+        this.sparkle.explode(46, this.boat.x, this.boat.y)
+        this.cameras.main.flash(300, 200, 255, 245, true)
+        this.saveNow()
+      }
+      if (this.pendingWinTimer > 0) {
         this.pendingWinTimer -= dt
         if (this.pendingWinTimer <= 0) this.showCompletion()
       }
@@ -1377,12 +1390,11 @@ export class GameScene extends Phaser.Scene {
       const dist = distanceToDock(this.boat)
       const home = edgeIndicator(WORLD.dock, view, screen, { clearMargin: 80, hysteresis: 50, wasShown: this.homeShown, insets })
       this.homeShown = home.show
-      const homePos = { x: home.x, y: home.y }
       if (home.show && !inDockRange(this.boat)) {
         markers.push({ key: 'home', kind: 'home', x: home.x, y: home.y, angle: home.angle, label: `Station ${metres(dist)} m` })
       }
       // Debris arrows.
-      let slot = 0
+      const occupied: { x: number; y: number; width: number }[] = markers.map((m) => ({ x: m.x, y: m.y, width: m.label.length * 8 + 16 }))
       for (const m of this.sensorReading.arrows) {
         const ind = edgeIndicator({ x: m.x, y: m.y }, view, screen, {
           clearMargin: 70,
@@ -1392,20 +1404,22 @@ export class GameScene extends Phaser.Scene {
         })
         this.arrowShown.set(m.key, ind.show)
         if (!ind.show) continue
-        // Do not stack on top of the station arrow.
-        if (home.show && Math.hypot(ind.x - homePos.x, ind.y - homePos.y) < 64) continue
+        // Station and nearer debris targets reserve label space first.
+        const label = debrisLabel(Math.hypot(m.x - this.boat.x, m.y - this.boat.y))
+        const bounds = { x: ind.x, y: ind.y, width: label.length * 8 + 16 }
+        if (occupied.some((other) => indicatorsOverlap(bounds, other))) continue
+        occupied.push(bounds)
         markers.push({
           key: `d:${m.key}`,
           kind: profile.source === 'assist' ? 'assist' : 'sonar',
           x: ind.x,
           y: ind.y,
           angle: ind.angle,
-          label: profile.subtle ? '' : distanceLabel(m.distance, profile.precision),
+          label,
           subtle: profile.subtle,
         })
-        slot += 1
       }
-      void slot
+
       // Sonar pulse rings (purchased sonar only).
       if (profile.pulse) {
         this.sonarTimer += dt

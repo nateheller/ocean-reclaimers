@@ -356,9 +356,8 @@ kbd {
 .edge.gone { opacity: 0; }
 .edge .earrow { width: 0; height: 0; border-left: 22px solid var(--gold); border-top: 11px solid transparent; border-bottom: 11px solid transparent; filter: drop-shadow(0 2px 0 rgba(90, 50, 0, .6)); }
 .edge .elabel { font-size: 11px; letter-spacing: .06em; text-transform: none; background: var(--navy); padding: 2px 8px; border-radius: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.edge.sonar .earrow { border-left-color: #6cf0c1; border-left-width: 18px; border-top-width: 9px; border-bottom-width: 9px; filter: drop-shadow(0 0 6px rgba(62, 230, 193, .7)); }
-.edge.sonar .elabel { border: 1px solid rgba(62, 230, 193, .55); color: #c9fff1; }
-.edge.assist .earrow { border-left-color: #bfefff; border-left-width: 16px; border-top-width: 8px; border-bottom-width: 8px; }
+.edge.sonar .earrow, .edge.assist .earrow { border-left-color: #60e3bf; filter: drop-shadow(0 2px 0 rgba(0, 75, 65, .6)); }
+.edge.sonar .elabel, .edge.assist .elabel { border: 1px solid rgba(62, 230, 193, .55); color: #c9fff1; }
 .edge.assist.subtle.on { opacity: .5; }
 .edge.assist.subtle .earrow { border-left-width: 14px; border-top-width: 7px; border-bottom-width: 7px; }
 
