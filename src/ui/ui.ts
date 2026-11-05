@@ -1,9 +1,11 @@
 /** Compact DOM HUD and menus layered over the game canvas. */
 import type { UpgradeId } from '../config/balance'
+import { LOCAL_SCORES_NOTE, PRIVACY_NOTE, RELEASE } from '../config/release'
 import type { ScoreEntry } from '../core/leaderboard'
 import { formatTime } from '../core/scoring'
 import { checkPurchase, UPGRADE_IDS, UPGRADES, type UpgradeLevels } from '../core/upgrades'
 import { Minimap } from './minimap'
+import { feedbackMarkup } from './feedback'
 
 export interface UIHandlers {
   onPlay(): void
@@ -215,12 +217,15 @@ export class GameUI {
         <div class="title-card">
           <div class="logo"><span class="logo-top">Ocean</span><span class="logo-main">Reclaimers</span></div>
           <p class="tagline">Scoop up the plastic. Clear Coral Bay.</p>
+          <p class="release-label">${RELEASE.label}</p>
           <div class="btns" id="title-btns"></div>
+          ${feedbackMarkup()}
           <div class="keys">
             <div><span class="kg"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span> or <span class="kg"><kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd></span> sail</div>
             <div><kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> station &nbsp; <kbd>R</kbd> tender &nbsp; <kbd>Tab</kbd> map &nbsp; <kbd>Esc</kbd> pause</div>
           </div>
           <p class="fine">A fictional, simplified game inspired by ISS Breakthrough SB012. Not a scientific model.</p>
+          <p class="fine privacy-note">${PRIVACY_NOTE}</p>
         </div>
       </section>
 
@@ -233,11 +238,13 @@ export class GameUI {
             <button class="btn" data-act="scores" tabindex="-1">High Scores</button>
             <button class="btn danger" data-act="new" tabindex="-1">New Game</button>
           </div>
+          ${feedbackMarkup()}
           <div class="keys small">
             <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows &ndash; sail</div>
             <div><kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> station &nbsp; <kbd>R</kbd> tender &nbsp; <kbd>Tab</kbd> map &nbsp; <kbd>M</kbd> mute</div>
           </div>
           <p class="fine">Fictional and simplified. Visual changes are stylized rewards, not scientific predictions.</p>
+          <p class="fine privacy-note">${PRIVACY_NOTE}</p>
         </div>
       </section>
 
@@ -293,6 +300,10 @@ export class GameUI {
       if ((e.target as HTMLElement).closest('[data-close]') || e.target === this.scores) this.hideScores()
     })
     this.onPauseRequest = () => {}
+    // Native Enter activation on the feedback link must not also start/resume the game.
+    root.addEventListener('keydown', (e) => {
+      if ((e.target as HTMLElement).closest('.feedback-link') && (e.key === 'Enter' || e.key === ' ')) e.stopPropagation()
+    })
   }
 
   setHandlers(h: UIHandlers): void {
@@ -689,7 +700,8 @@ export class GameUI {
           <button class="btn" data-act="scores" tabindex="-1">High Scores</button>
           <button class="btn" data-act="new" tabindex="-1">New Game</button>
         </div>
-        <p class="fine">A fictional, simplified game. The clearer water and extra wildlife are stylized rewards, not scientific predictions. Scores are stored on this device only.</p>
+        <p class="local-scores-note">${LOCAL_SCORES_NOTE}</p>
+        <p class="fine">A fictional, simplified game. The clearer water and extra wildlife are stylized rewards, not scientific predictions.</p>
       </div>`
     this.win.hidden = false
     this.win.onclick = (e) => {
@@ -774,7 +786,8 @@ export class GameUI {
             : '<div class="empty">No scores yet &ndash; complete a run in this category to set the first one.</div>'
         }
         <div class="btns"><button class="btn" data-alternate tabindex="-1">${v.alternateLabel ?? 'Other Scores'}</button><button class="btn primary" data-close tabindex="-1">Close</button></div>
-        <p class="fine">Final score = arcade score &times; time multiplier. Scores are stored on this device only.</p>
+        <p class="local-scores-note">${LOCAL_SCORES_NOTE}</p>
+        <p class="fine">Final score = arcade score &times; time multiplier.</p>
       </div>`
     this.scores.querySelector<HTMLButtonElement>('[data-alternate]')?.addEventListener('click', () => v.onAlternate?.())
     this.scores.hidden = false
