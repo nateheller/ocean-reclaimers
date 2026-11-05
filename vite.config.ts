@@ -2,13 +2,13 @@
 import { loadEnv } from 'vite'
 import { defineConfig } from 'vitest/config'
 
-// Relative base keeps production output portable; the Session owns preview HOST/PORT.
-export default defineConfig(({ mode }) => {
+// GitHub Pages serves production under the repository path; development stays at /.
+export default defineConfig(({ mode, command, isPreview }) => {
   const env = loadEnv(mode, '.', ['HOST', 'PORT'])
   const port = Number(env.PORT ?? 3000)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT')
   return {
-    base: './',
+    base: command === 'build' || isPreview ? '/ocean-reclaimers/' : '/',
     
     server: {
       host: env.HOST ?? '127.0.0.1', port, strictPort: true,

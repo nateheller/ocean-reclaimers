@@ -27,10 +27,38 @@ pnpm install        # or: npm install
 pnpm dev            # dev server (PORT / HOST env vars override; default http://127.0.0.1:3000)
 pnpm test           # automated tests (vitest)
 pnpm build          # typecheck + production build into dist/
-pnpm preview        # serve dist/ at http://localhost:4173
+pnpm preview        # serve dist/ at http://localhost:4173/ocean-reclaimers/
 ```
 
-Requires Node 20+. `dist/` is fully static (relative base), so it can be hosted anywhere.
+Use Node.js 24 and the declared pnpm 10.18.0 version (also used in CI). Production output is fully static and uses
+the `/ocean-reclaimers/` base path. `pnpm dev` keeps the existing root URL for local development.
+
+## GitHub Pages deployment
+
+Public URL: **https://nateheller.github.io/ocean-reclaimers/**.
+
+GitHub Pages must use **GitHub Actions** as its source in repository Settings → Pages. After this change is reviewed
+and merged, `.github/workflows/deploy-pages.yml` runs on pushes to `main`. It can also be run from Actions →
+Deploy GitHub Pages → Run workflow, selecting **main**. Other branches cannot deploy through this workflow.
+
+The build job uses Node.js 24 and pnpm from `package.json`, installs with `pnpm install --frozen-lockfile`, and runs
+`pnpm test`, `pnpm typecheck`, and `pnpm build`. Only successful builds upload `dist` using the official Pages artifact
+action. A separate job deploys that artifact to the `github-pages` environment with `pages: write` and `id-token: write`.
+Deployments are serialized without cancelling an in-progress deployment. The existing CI workflow is unchanged.
+No additional hosting service, dependency, analytics, or deployment secret is needed.
+
+For local validation, run those same checks followed by `pnpm preview`, then open
+`http://localhost:4173/ocean-reclaimers/`. Vite rebases the JavaScript, CSS, HTML images and CSS font URLs; scenery
+textures are generated in the browser, and audio is synthesized locally. Keep public asset references Vite-managed
+or relative to its configured base. Existing Manus asset-restoration/sharing scripts are retained unchanged.
+
+The Google Forms feedback link remains an absolute external URL, opened only by the player; no game data is attached.
+Save keys, migrations, and all leaderboard categories are unchanged. Browser storage is **origin-specific**:
+existing localhost or Manus-hosted progress does not automatically appear on `nateheller.github.io`. Moving hosts
+does not delete that original storage. Later deployments on the same Pages origin retain its saved progress and scores.
+
+After the first approved deployment, verify the public URL, fonts/favicon, browser console/network errors, gameplay,
+feedback link, and save/score persistence across reloads. GitHub environment approval rules, if configured, still apply.
 
 ## Controls
 
