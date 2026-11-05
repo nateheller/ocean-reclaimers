@@ -3,4 +3,5 @@ dist/
 shots/
 /.manus-webdev/preview-identity.json
 # Assets restored from assets.lock.json
-/assets/share/favicon.png
+# Keep the existing sharing favicon in Git for credential-free CI builds.
+!/assets/share/favicon.png
